@@ -9,7 +9,7 @@
     "seed:categories": "node seeders/seedCategories.js",
     "seed:demo": "node seeders/seedDemoData.js",
     "seed": "npm run seed:categories && npm run seed:demo",
-    "check:models": "node -e \"for (const model of ['User','CategorieDonation','Donation','Collecte','IaAnalyse','Rapport']) require('./models/' + model); console.log('Tous les modèles sont importables')\""
+    "check:models": "node -e \"for (const model of ['User','CategorieDonation','Annonce','Matching','Conversation','Message','Donation','Collecte','IaAnalyse','Rapport']) require('./models/' + model); console.log('Tous les modèles sont importables')\""
   },
   "keywords": [],
   "author": "",

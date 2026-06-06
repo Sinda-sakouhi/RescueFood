@@ -6,137 +6,161 @@ RescueFood est une application de redistribution alimentaire composée de :
 - une API Node.js/Express ;
 - une base MongoDB gérée avec Mongoose.
 
-## Prérequis
+## Installation sous Windows
 
-Installer les outils suivants avant de commencer :
+Toutes les commandes suivantes doivent être exécutées dans **PowerShell**.
 
-- Git ;
-- Node.js 24 et npm ;
-- MongoDB Community Server.
+### 1. Installer les prérequis
 
-MongoDB Compass est facultatif. Il permet seulement de consulter graphiquement
-la base de données.
+Installer :
 
-## 1. Cloner le projet
+- [Git pour Windows](https://git-scm.com/download/win)
+- [Node.js](https://nodejs.org/) version 24
+- [MongoDB Community Server](https://www.mongodb.com/try/download/community)
 
-```bash
-git clone https://github.com/Sinda-sakouhi/RescueFood.git
-cd RescueFood
+MongoDB Compass est facultatif, mais utile pour consulter la base
+graphiquement.
+
+Vérifier l'installation :
+
+```powershell
+git --version
+node --version
+npm --version
 ```
 
-## 2. Installer les dépendances
+### 2. Cloner le projet
 
-Exécuter les trois commandes depuis la racine du projet :
+```powershell
+git clone https://github.com/Sinda-sakouhi/RescueFood.git
+Set-Location RescueFood
+```
 
-```bash
+### 3. Installer les dépendances
+
+Depuis la racine `RescueFood` :
+
+```powershell
 npm ci
 npm ci --prefix backend
 npm ci --prefix frontend
 ```
 
-`npm ci` utilise les fichiers `package-lock.json` afin que tous les membres de
-l'équipe installent les mêmes versions.
-
-## 3. Configurer le backend
-
-Créer `backend/.env` à partir du fichier d'exemple.
-
-Sous Windows PowerShell :
+### 4. Créer le fichier de configuration
 
 ```powershell
-Copy-Item backend/.env.example backend/.env
+Copy-Item backend\.env.example backend\.env
 ```
 
-Sous Linux ou macOS :
-
-```bash
-cp backend/.env.example backend/.env
-```
-
-Configuration locale par défaut :
+Le fichier `backend\.env` doit contenir :
 
 ```env
 PORT=3000
 MONGODB_URI=mongodb://127.0.0.1:27017/RescueFood
 ```
 
-Ne jamais ajouter `backend/.env` à Git.
+Le fichier `.env` est privé et ne doit jamais être ajouté à Git.
 
-## 4. Démarrer MongoDB
+### 5. Démarrer MongoDB
 
-Le serveur MongoDB doit fonctionner sur le port `27017` avant de lancer
-l'application.
+MongoDB doit fonctionner avant de lancer le backend.
 
-Sous Windows, si MongoDB est installé comme service :
+Si MongoDB est installé comme service Windows, ouvrir PowerShell en tant
+qu'administrateur et exécuter :
 
 ```powershell
 Start-Service MongoDB
 ```
 
-Sous Linux avec `systemd` :
+Vérifier que MongoDB écoute sur le port `27017` :
 
-```bash
-sudo systemctl start mongod
+```powershell
+Get-NetTCPConnection -LocalPort 27017 -State Listen
 ```
 
-Connexion facultative depuis MongoDB Compass :
+Dans MongoDB Compass, utiliser cette URI :
 
 ```text
 mongodb://localhost:27017/RescueFood
 ```
 
-## 5. Initialiser les données
+### 6. Initialiser la base de données
 
 Depuis la racine du projet :
 
-```bash
+```powershell
 npm run seed --prefix backend
 ```
 
-Cette commande crée :
+Cette commande crée les catégories et les données de démonstration :
 
-- 7 catégories de donation ;
-- 7 utilisateurs de démonstration ;
+- 7 utilisateurs ;
+- 4 annonces ;
+- 1 matching automatique ;
+- 1 conversation et 2 messages ;
 - 3 donations ;
 - 2 collectes ;
 - 3 analyses IA ;
 - 1 rapport.
 
-Le seeder peut être relancé sans accumuler les données de démonstration. Les
-comptes factices utilisent le domaine `@rescuefood.demo`.
+Le seeder peut être relancé sans accumuler les données de démonstration.
 
-## 6. Lancer l'application
+### 7. Lancer le projet
 
 Depuis la racine :
 
-```bash
+```powershell
 npm run dev
 ```
 
-Cette commande démarre simultanément :
+Ouvrir ensuite :
 
-- le frontend : <http://localhost:4200>
-- le backend : <http://localhost:3000>
+- frontend : <http://localhost:4200>
+- backend : <http://localhost:3000>
 
-Arrêter les serveurs avec `Ctrl+C`.
+Pour arrêter les serveurs, utiliser `Ctrl+C`.
+
+## Démarrages séparés
+
+Lancer uniquement le backend :
+
+```powershell
+npm run backend
+```
+
+Lancer uniquement le frontend :
+
+```powershell
+npm run frontend
+```
 
 ## Commandes utiles
 
-```bash
-# Lancer uniquement le backend
-npm run backend
+Compiler le frontend :
 
-# Lancer uniquement le frontend
-npm run frontend
-
-# Compiler le frontend
+```powershell
 npm run build
+```
 
-# Vérifier les imports des modèles Mongoose
+Vérifier les modèles Mongoose :
+
+```powershell
 npm run check:models --prefix backend
+```
 
-# Réinitialiser les données de démonstration
+Recréer les données de démonstration :
+
+```powershell
 npm run seed --prefix backend
+```
+
+Mettre à jour le projet depuis GitHub :
+
+```powershell
+git pull origin main
+npm ci
+npm ci --prefix backend
+npm ci --prefix frontend
 ```
 
 ## Structure du projet
@@ -155,52 +179,58 @@ RescueFood/
 `-- README.md
 ```
 
-## Modèle de données
-
-Les collections MongoDB sont :
+## Collections MongoDB
 
 - `users`
 - `categoriedonations`
+- `annonces`
+- `matchings`
+- `conversations`
+- `messages`
 - `donations`
 - `collectes`
 - `iaanalyses`
 - `rapports`
 
-Une donation représente directement un lot alimentaire. Elle contient sa
-composition, sa quantité, ses photos et ses conditions de stockage. Il
-n'existe donc pas de collection `produits`.
+## Résolution des problèmes sous Windows
 
-Les analyses de vision par ordinateur référencent une donation. Leur résultat
-peut être :
+### MongoDB ne démarre pas
 
-- `ACCEPTE`
-- `CONTROLE_HUMAIN_REQUIS`
-- `REFUSE`
-
-L'analyse visuelle ne remplace pas le contrôle humain ni les règles de sécurité
-alimentaire.
-
-## Résolution des problèmes
-
-### MongoDB ne se connecte pas
-
-Vérifier que MongoDB est démarré et écoute sur le port `27017` :
+Vérifier si le service existe :
 
 ```powershell
-Get-NetTCPConnection -LocalPort 27017 -State Listen
+Get-Service MongoDB
 ```
 
-Vérifier ensuite la valeur de `MONGODB_URI` dans `backend/.env`.
+Puis le démarrer dans un PowerShell administrateur :
 
-### Le port est déjà utilisé
+```powershell
+Start-Service MongoDB
+```
 
-Modifier `PORT` dans `backend/.env`. Si le port du backend change, modifier
-également la cible dans `frontend/proxy.conf.json`.
+### Le port `3000` est déjà utilisé
+
+Identifier le processus :
+
+```powershell
+Get-NetTCPConnection -LocalPort 3000 -State Listen
+```
+
+Modifier ensuite `PORT` dans `backend\.env` et la cible correspondante dans
+`frontend\proxy.conf.json`.
+
+### Le port `4200` est déjà utilisé
+
+Identifier le processus :
+
+```powershell
+Get-NetTCPConnection -LocalPort 4200 -State Listen
+```
 
 ### Les collections ne sont pas visibles dans Compass
 
-Actualiser la base `RescueFood` après avoir exécuté :
+Exécuter le seeder puis actualiser la base `RescueFood` :
 
-```bash
+```powershell
 npm run seed --prefix backend
 ```

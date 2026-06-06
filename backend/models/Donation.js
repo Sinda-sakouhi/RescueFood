@@ -42,6 +42,11 @@ const donationSchema = new mongoose.Schema(
       ref: 'User',
       default: null
     },
+    matchingSource: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Matching',
+      default: null
+    },
     categorieDonation: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'CategorieDonation',
@@ -144,5 +149,6 @@ donationSchema.index({ statut: 1, urgence: 1 });
 donationSchema.index({ fournisseur: 1, createdAt: -1 });
 donationSchema.index({ beneficiaire: 1, statut: 1 });
 donationSchema.index({ categorieDonation: 1, dateLimiteCollecte: 1 });
+donationSchema.index({ matchingSource: 1 }, { sparse: true });
 
 module.exports = mongoose.model('Donation', donationSchema);

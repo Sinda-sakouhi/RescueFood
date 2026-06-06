@@ -4,6 +4,10 @@ const mongoose = require('mongoose');
 const connectDB = require('../config/db');
 const User = require('../models/User');
 const CategorieDonation = require('../models/CategorieDonation');
+const Annonce = require('../models/Annonce');
+const Matching = require('../models/Matching');
+const Conversation = require('../models/Conversation');
+const Message = require('../models/Message');
 const Donation = require('../models/Donation');
 const Collecte = require('../models/Collecte');
 const IaAnalyse = require('../models/IaAnalyse');
@@ -129,12 +133,34 @@ async function upsertDemoUsers() {
 
 async function removePreviousDemoData(users) {
   const demoUserIds = Object.values(users).map((user) => user._id);
+  const oldAnnonces = await Annonce.find({
+    auteur: { $in: demoUserIds }
+  }).select('_id');
+  const oldAnnonceIds = oldAnnonces.map((annonce) => annonce._id);
+  const oldMatchings = await Matching.find({
+    $or: [
+      { offre: { $in: oldAnnonceIds } },
+      { demande: { $in: oldAnnonceIds } }
+    ]
+  }).select('_id');
+  const oldMatchingIds = oldMatchings.map((matching) => matching._id);
+  const oldConversations = await Conversation.find({
+    $or: [
+      { annonce: { $in: oldAnnonceIds } },
+      { matching: { $in: oldMatchingIds } }
+    ]
+  }).select('_id');
+  const oldConversationIds = oldConversations.map(
+    (conversation) => conversation._id
+  );
   const oldDonations = await Donation.find({
     fournisseur: { $in: demoUserIds }
   }).select('_id');
   const oldDonationIds = oldDonations.map((donation) => donation._id);
 
   await Promise.all([
+    Message.deleteMany({ conversation: { $in: oldConversationIds } }),
+    Conversation.deleteMany({ _id: { $in: oldConversationIds } }),
     Collecte.deleteMany({ donation: { $in: oldDonationIds } }),
     IaAnalyse.deleteMany({ donation: { $in: oldDonationIds } }),
     IaAnalyse.deleteMany({
@@ -144,6 +170,8 @@ async function removePreviousDemoData(users) {
   ]);
 
   await Donation.deleteMany({ _id: { $in: oldDonationIds } });
+  await Matching.deleteMany({ _id: { $in: oldMatchingIds } });
+  await Annonce.deleteMany({ _id: { $in: oldAnnonceIds } });
 }
 
 async function seedDemoData() {
@@ -171,12 +199,95 @@ async function seedDemoData() {
     const ongEntraide = users[DEMO_EMAILS[4]];
     const transporteur = users[DEMO_EMAILS[5]];
 
+    const annonces = await Annonce.create([
+      {
+        auteur: marche._id,
+        type: 'OFFRE',
+        titre: 'Surplus de tomates fraîches',
+        description:
+          'Cinq cagettes de tomates disponibles pour une redistribution rapide.',
+        categorieDonation: categoriesByType.FRUITS_LEGUMES._id,
+        quantiteEstimee: 25,
+        unite: 'KG',
+        urgence: 'ELEVEE',
+        images: ['https://images.example.com/tomates-face.jpg'],
+        adresse: marche.adresse,
+        localisation: marche.localisation,
+        dateExpiration: addDays(1, 17),
+        statut: 'ACTIVE'
+      },
+      {
+        auteur: ongSolidarite._id,
+        type: 'DEMANDE',
+        titre: 'Besoin urgent de fruits et légumes',
+        description:
+          'Recherche de produits frais pour préparer des paniers solidaires.',
+        categorieDonation: categoriesByType.FRUITS_LEGUMES._id,
+        quantiteEstimee: 20,
+        unite: 'KG',
+        urgence: 'ELEVEE',
+        images: [],
+        adresse: ongSolidarite.adresse,
+        localisation: ongSolidarite.localisation,
+        dateExpiration: addDays(2, 18),
+        statut: 'ACTIVE'
+      },
+      {
+        auteur: boulangerie._id,
+        type: 'OFFRE',
+        titre: 'Pains disponibles en fin de journée',
+        description: 'Pains et viennoiseries disponibles après la fermeture.',
+        categorieDonation: categoriesByType.PAIN_VIENNOISERIE._id,
+        quantiteEstimee: 50,
+        unite: 'UNITE',
+        urgence: 'ELEVEE',
+        images: ['https://images.example.com/pains-lot.jpg'],
+        adresse: boulangerie.adresse,
+        localisation: boulangerie.localisation,
+        dateExpiration: addDays(1, 10),
+        statut: 'ACTIVE'
+      },
+      {
+        auteur: ongEntraide._id,
+        type: 'DEMANDE',
+        titre: 'Recherche de produits laitiers',
+        description: 'Besoin de lait pour les petits-déjeuners associatifs.',
+        categorieDonation: categoriesByType.PRODUITS_LAITIERS._id,
+        quantiteEstimee: 30,
+        unite: 'L',
+        urgence: 'MOYENNE',
+        images: [],
+        adresse: ongEntraide.adresse,
+        localisation: ongEntraide.localisation,
+        dateExpiration: addDays(7, 18),
+        statut: 'ACTIVE'
+      }
+    ]);
+
+    const [offreTomates, demandeLegumes] = annonces;
+
+    const matchingTomates = await Matching.create({
+      offre: offreTomates._id,
+      demande: demandeLegumes._id,
+      score: 0.91,
+      criteres: {
+        categorie: 1,
+        distance: 0.82,
+        quantite: 0.9,
+        urgence: 1
+      },
+      distanceKm: 4.8,
+      statut: 'ACCEPTE',
+      expireLe: addDays(1, 12)
+    });
+
     const donations = await Donation.create([
       {
         titre: 'Cagettes de tomates à redistribuer',
         description: '25 kg de tomates mûres issues des invendus du jour.',
         fournisseur: marche._id,
         beneficiaire: ongSolidarite._id,
+        matchingSource: matchingTomates._id,
         categorieDonation: categoriesByType.FRUITS_LEGUMES._id,
         compositionLot: 'Tomates rouges mûres en cinq cagettes.',
         quantiteEstimee: 25,
@@ -244,6 +355,50 @@ async function seedDemoData() {
     ]);
 
     const [donTomates, donPain, donPommes] = donations;
+
+    matchingTomates.statut = 'CONVERTI_EN_DON';
+    matchingTomates.donationCreee = donTomates._id;
+    await matchingTomates.save();
+
+    await Annonce.updateMany(
+      { _id: { $in: [offreTomates._id, demandeLegumes._id] } },
+      {
+        $set: { statut: 'MATCHEE' },
+        $push: {
+          historiqueStatuts: {
+            statut: 'MATCHEE',
+            date: new Date()
+          }
+        }
+      }
+    );
+
+    const conversation = await Conversation.create({
+      participants: [marche._id, ongSolidarite._id],
+      annonce: offreTomates._id,
+      matching: matchingTomates._id,
+      statut: 'ACTIVE',
+      dernierMessageAt: new Date()
+    });
+
+    await Message.create([
+      {
+        conversation: conversation._id,
+        expediteur: ongSolidarite._id,
+        contenu:
+          'Bonjour, notre association peut récupérer les tomates cet après-midi.',
+        luPar: [ongSolidarite._id, marche._id],
+        dateLecture: new Date()
+      },
+      {
+        conversation: conversation._id,
+        expediteur: marche._id,
+        contenu:
+          'Parfait, les cinq cagettes seront prêtes à partir de 14 heures.',
+        luPar: [marche._id],
+        dateLecture: null
+      }
+    ]);
 
     await Collecte.create([
       {
@@ -386,6 +541,9 @@ async function seedDemoData() {
 
     console.log('Données de démonstration enregistrées :');
     console.log(`- ${Object.keys(users).length} utilisateurs`);
+    console.log(`- ${annonces.length} annonces`);
+    console.log('- 1 matching automatique');
+    console.log('- 1 conversation et 2 messages');
     console.log(`- ${donations.length} donations`);
     console.log('- 2 collectes');
     console.log('- 3 analyses IA');
