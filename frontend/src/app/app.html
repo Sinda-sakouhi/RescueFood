@@ -1,0 +1,33 @@
+<main class="page">
+  <section class="hero">
+    <span class="eyebrow">Anti-gaspillage alimentaire</span>
+    <h1>RescueFood</h1>
+    <p class="intro">
+      Une base Angular et Express prête à accueillir les fonctionnalités de
+      collecte, de partage et de redistribution des invendus alimentaires.
+    </p>
+
+    <div class="status" [class.status--online]="apiStatus() === 'online'">
+      <span class="status__dot" aria-hidden="true"></span>
+      <span>{{ statusLabel() }}</span>
+    </div>
+  </section>
+
+  <section class="features" aria-label="Fonctionnalités à venir">
+    <article>
+      <span>01</span>
+      <h2>Publier</h2>
+      <p>Signaler rapidement des aliments disponibles près de chez vous.</p>
+    </article>
+    <article>
+      <span>02</span>
+      <h2>Collecter</h2>
+      <p>Réserver les produits et organiser leur récupération.</p>
+    </article>
+    <article>
+      <span>03</span>
+      <h2>Partager</h2>
+      <p>Créer un réseau local plus solidaire et limiter le gaspillage.</p>
+    </article>
+  </section>
+</main>
