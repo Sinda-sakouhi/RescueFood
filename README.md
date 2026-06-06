@@ -1,78 +1,206 @@
 # RescueFood
 
-Application web anti-gaspillage composée de :
+RescueFood est une application de redistribution alimentaire composée de :
 
-- `frontend/` : Angular
-- `backend/` : Express.js avec MongoDB et Mongoose
+- un frontend Angular ;
+- une API Node.js/Express ;
+- une base MongoDB gérée avec Mongoose.
 
-## Installation
+## Prérequis
 
-Les dépendances sont déjà déclarées dans chaque partie du projet :
+Installer les outils suivants avant de commencer :
+
+- Git ;
+- Node.js 24 et npm ;
+- MongoDB Community Server.
+
+MongoDB Compass est facultatif. Il permet seulement de consulter graphiquement
+la base de données.
+
+## 1. Cloner le projet
 
 ```bash
-npm install
-npm install --prefix backend
-npm install --prefix frontend
+git clone https://github.com/Sinda-sakouhi/RescueFood.git
+cd RescueFood
 ```
 
-## Développement
+## 2. Installer les dépendances
 
-Lancer le frontend et le backend ensemble :
+Exécuter les trois commandes depuis la racine du projet :
 
 ```bash
-npm run dev
+npm ci
+npm ci --prefix backend
+npm ci --prefix frontend
 ```
 
-- Frontend : <http://localhost:4200>
-- Backend Express : <http://localhost:3000>
+`npm ci` utilise les fichiers `package-lock.json` afin que tous les membres de
+l'équipe installent les mêmes versions.
 
-## MongoDB
+## 3. Configurer le backend
 
-Le backend utilise la connexion locale suivante, définie dans `backend/.env` :
+Créer `backend/.env` à partir du fichier d'exemple.
+
+Sous Windows PowerShell :
+
+```powershell
+Copy-Item backend/.env.example backend/.env
+```
+
+Sous Linux ou macOS :
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Configuration locale par défaut :
 
 ```env
+PORT=3000
 MONGODB_URI=mongodb://127.0.0.1:27017/RescueFood
 ```
 
-MongoDB doit être lancé avant le backend. Dans MongoDB Compass, vous pouvez
-utiliser `mongodb://localhost:27017/` comme URI ; le champ `Name` est seulement
-un libellé pour la connexion Compass.
+Ne jamais ajouter `backend/.env` à Git.
 
-Les modèles Mongoose se trouvent dans `backend/models/`. Pour insérer ou
-mettre à jour les catégories de donation de base :
+## 4. Démarrer MongoDB
 
-```bash
-npm run seed:categories --prefix backend
+Le serveur MongoDB doit fonctionner sur le port `27017` avant de lancer
+l'application.
+
+Sous Windows, si MongoDB est installé comme service :
+
+```powershell
+Start-Service MongoDB
 ```
 
-Pour vérifier que tous les modèles sont importables :
+Sous Linux avec `systemd` :
 
 ```bash
-npm run check:models --prefix backend
+sudo systemctl start mongod
 ```
 
-Pour insérer toutes les données de démonstration :
+Connexion facultative depuis MongoDB Compass :
+
+```text
+mongodb://localhost:27017/RescueFood
+```
+
+## 5. Initialiser les données
+
+Depuis la racine du projet :
 
 ```bash
 npm run seed --prefix backend
 ```
 
-Le seeder de démonstration peut être relancé sans accumuler de doublons. Les
+Cette commande crée :
+
+- 7 catégories de donation ;
+- 7 utilisateurs de démonstration ;
+- 3 donations ;
+- 2 collectes ;
+- 3 analyses IA ;
+- 1 rapport.
+
+Le seeder peut être relancé sans accumuler les données de démonstration. Les
 comptes factices utilisent le domaine `@rescuefood.demo`.
 
-Les donations contiennent directement leurs informations alimentaires
-(catégorie, description et poids). Il n’existe pas de collection `produits`.
+## 6. Lancer l'application
 
-Chaque donation décrit également son lot avec sa composition, sa quantité,
-ses images et ses conditions de stockage. Les résultats de vision par
-ordinateur sont enregistrés dans `iaanalyses` et référencent la donation
-analysée. Une décision IA indique si le lot est accepté, refusé ou doit être
-contrôlé par une personne.
-
-## Autres commandes
+Depuis la racine :
 
 ```bash
-npm run frontend
+npm run dev
+```
+
+Cette commande démarre simultanément :
+
+- le frontend : <http://localhost:4200>
+- le backend : <http://localhost:3000>
+
+Arrêter les serveurs avec `Ctrl+C`.
+
+## Commandes utiles
+
+```bash
+# Lancer uniquement le backend
 npm run backend
+
+# Lancer uniquement le frontend
+npm run frontend
+
+# Compiler le frontend
 npm run build
+
+# Vérifier les imports des modèles Mongoose
+npm run check:models --prefix backend
+
+# Réinitialiser les données de démonstration
+npm run seed --prefix backend
+```
+
+## Structure du projet
+
+```text
+RescueFood/
+|-- backend/
+|   |-- config/
+|   |-- models/
+|   |-- seeders/
+|   |-- .env.example
+|   `-- server.js
+|-- frontend/
+|   `-- src/
+|-- package.json
+`-- README.md
+```
+
+## Modèle de données
+
+Les collections MongoDB sont :
+
+- `users`
+- `categoriedonations`
+- `donations`
+- `collectes`
+- `iaanalyses`
+- `rapports`
+
+Une donation représente directement un lot alimentaire. Elle contient sa
+composition, sa quantité, ses photos et ses conditions de stockage. Il
+n'existe donc pas de collection `produits`.
+
+Les analyses de vision par ordinateur référencent une donation. Leur résultat
+peut être :
+
+- `ACCEPTE`
+- `CONTROLE_HUMAIN_REQUIS`
+- `REFUSE`
+
+L'analyse visuelle ne remplace pas le contrôle humain ni les règles de sécurité
+alimentaire.
+
+## Résolution des problèmes
+
+### MongoDB ne se connecte pas
+
+Vérifier que MongoDB est démarré et écoute sur le port `27017` :
+
+```powershell
+Get-NetTCPConnection -LocalPort 27017 -State Listen
+```
+
+Vérifier ensuite la valeur de `MONGODB_URI` dans `backend/.env`.
+
+### Le port est déjà utilisé
+
+Modifier `PORT` dans `backend/.env`. Si le port du backend change, modifier
+également la cible dans `frontend/proxy.conf.json`.
+
+### Les collections ne sont pas visibles dans Compass
+
+Actualiser la base `RescueFood` après avoir exécuté :
+
+```bash
+npm run seed --prefix backend
 ```
