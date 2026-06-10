@@ -1,6 +1,7 @@
 require('dotenv').config({ quiet: true });
 
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 const connectDB = require('../config/db');
 const User = require('../models/User');
 const CategorieDonation = require('../models/CategorieDonation');
@@ -112,10 +113,16 @@ async function upsertDemoUsers() {
   ];
 
   const savedUsers = await Promise.all(
-    users.map((user) =>
+    users.map(async (user) =>
       User.findOneAndUpdate(
         { email: user.email },
-        { $set: user },
+        {
+          $set: {
+            ...user,
+            motDePasse: await bcrypt.hash(user.motDePasse, 12),
+            emailVerifie: true
+          }
+        },
         {
           upsert: true,
           returnDocument: 'after',

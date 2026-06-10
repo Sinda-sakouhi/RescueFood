@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 
 const localisationSchema = new mongoose.Schema(
   {
@@ -70,9 +71,42 @@ const userSchema = new mongoose.Schema(
       type: String,
       enum: ['EN_ATTENTE', 'VALIDE', 'REFUSE', 'SUSPENDU'],
       default: 'EN_ATTENTE'
+    },
+    avatarUrl: {
+      type: String,
+      trim: true,
+      default: null
+    },
+    emailVerifie: {
+      type: Boolean,
+      default: false
+    },
+    derniereConnexion: {
+      type: Date,
+      default: null
+    },
+    tokenVersion: {
+      type: Number,
+      default: 0,
+      min: 0,
+      select: false
     }
   },
   { timestamps: true }
 );
+
+userSchema.pre('save', async function hashPassword() {
+  if (!this.isModified('motDePasse')) {
+    return;
+  }
+
+  this.motDePasse = await bcrypt.hash(this.motDePasse, 12);
+});
+
+userSchema.methods.comparerMotDePasse = function comparerMotDePasse(
+  motDePasse
+) {
+  return bcrypt.compare(motDePasse, this.motDePasse);
+};
 
 module.exports = mongoose.model('User', userSchema);
