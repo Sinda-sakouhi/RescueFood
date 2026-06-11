@@ -3,7 +3,9 @@ const express = require('express');
 const helmet = require('helmet');
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
-
+const annonceRoutes = require('./routes/annonceRoutes');
+const matchingRoutes = require('./routes/matchingRoutes');
+const conversationRoutes = require('./routes/conversationRoutes');
 const app = express();
 
 app.use(helmet());
@@ -19,7 +21,9 @@ app.get('/api/health', (request, response) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
-
+app.use('/api/annonces', annonceRoutes);
+app.use('/api/matchings', matchingRoutes);
+app.use('/api/conversations', conversationRoutes);  
 app.use((request, response) => {
   response.status(404).json({
     message: 'Route introuvable'
