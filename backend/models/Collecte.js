@@ -35,8 +35,38 @@ const itineraireSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const positionSchema = new mongoose.Schema(
+  {
+    latitude: { type: Number, required: true, min: -90, max: 90 },
+    longitude: { type: Number, required: true, min: -180, max: 180 },
+    enregistreeLe: { type: Date, default: Date.now }
+  },
+  { _id: false }
+);
+
+const historiqueStatutSchema = new mongoose.Schema(
+  {
+    statut: { type: String, required: true },
+    date: { type: Date, default: Date.now },
+    modifiePar: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null
+    },
+    note: { type: String, trim: true, maxlength: 500, default: '' }
+  },
+  { _id: false }
+);
+
 const collecteSchema = new mongoose.Schema(
   {
+    reference: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+      uppercase: true
+    },
     donation: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Donation',
@@ -46,7 +76,7 @@ const collecteSchema = new mongoose.Schema(
     transporteur: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true
+      default: null
     },
     fournisseur: {
       type: mongoose.Schema.Types.ObjectId,
@@ -60,8 +90,20 @@ const collecteSchema = new mongoose.Schema(
     },
     statut: {
       type: String,
-      enum: ['PLANIFIEE', 'EN_ROUTE', 'COLLECTEE', 'LIVREE', 'ANNULEE'],
-      default: 'PLANIFIEE'
+      enum: [
+        'A_ASSIGNER',
+        'PLANIFIEE',
+        'EN_ROUTE',
+        'COLLECTEE',
+        'LIVREE',
+        'ANNULEE'
+      ],
+      default: 'A_ASSIGNER'
+    },
+    priorite: {
+      type: String,
+      enum: ['NORMALE', 'URGENTE'],
+      default: 'NORMALE'
     },
     adresseDepart: {
       type: String,
@@ -101,9 +143,35 @@ const collecteSchema = new mongoose.Schema(
       type: Date,
       default: null
     },
+    dateLivraisonPrevue: {
+      type: Date,
+      default: null
+    },
     dateLivraison: {
       type: Date,
       default: null
+    },
+    vehicule: {
+      type: String,
+      trim: true,
+      maxlength: 120,
+      default: ''
+    },
+    positionActuelle: {
+      type: localisationSchema,
+      default: undefined
+    },
+    dernierePositionAt: {
+      type: Date,
+      default: null
+    },
+    historiquePositions: {
+      type: [positionSchema],
+      default: []
+    },
+    historiqueStatuts: {
+      type: [historiqueStatutSchema],
+      default: []
     },
     itineraireOptimise: {
       type: itineraireSchema,
@@ -115,5 +183,6 @@ const collecteSchema = new mongoose.Schema(
 
 collecteSchema.index({ transporteur: 1, statut: 1 });
 collecteSchema.index({ dateCollectePrevue: 1 });
+collecteSchema.index({ statut: 1, dateCollectePrevue: 1 });
 
 module.exports = mongoose.model('Collecte', collecteSchema);

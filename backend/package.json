@@ -9,6 +9,7 @@
     "seed:categories": "node seeders/seedCategories.js",
     "seed:demo": "node seeders/seedDemoData.js",
     "seed": "npm run seed:categories && npm run seed:demo",
+    "test": "node --test",
     "check:models": "node -e \"for (const model of ['User','CategorieDonation','Annonce','Matching','Conversation','Message','Donation','Collecte','IaAnalyse','Rapport']) require('./models/' + model); console.log('Tous les modèles sont importables')\""
   },
   "keywords": [],
@@ -23,7 +24,8 @@
     "express-rate-limit": "^8.5.2",
     "helmet": "^8.2.0",
     "jsonwebtoken": "^9.0.3",
-    "mongoose": "^9.6.3"
+    "mongoose": "^9.6.3",
+    "pdfkit": "^0.19.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

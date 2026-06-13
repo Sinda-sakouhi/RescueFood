@@ -139,9 +139,6 @@ async function getSuggestions(request, response, next) {
 // POST /api/matchings — accepter un matching
 // → crée le matching ET la conversation automatiquement
 async function accepterMatching(request, response, next) {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
     const { offreId, demandeId } = request.body;
 
@@ -149,29 +146,25 @@ async function accepterMatching(request, response, next) {
       !mongoose.isValidObjectId(offreId) ||
       !mongoose.isValidObjectId(demandeId)
     ) {
-      await session.abortTransaction();
       return response.status(400).json({ message: 'Identifiant invalide' });
     }
 
     const [offre, demande] = await Promise.all([
-      Annonce.findById(offreId).session(session),
-      Annonce.findById(demandeId).session(session)
+      Annonce.findById(offreId),
+      Annonce.findById(demandeId)
     ]);
 
     if (!offre || !demande) {
-      await session.abortTransaction();
       return response.status(404).json({ message: 'Annonce introuvable' });
     }
 
     if (offre.type !== 'OFFRE' || demande.type !== 'DEMANDE') {
-      await session.abortTransaction();
       return response.status(400).json({
         message: 'Le premier identifiant doit être une offre et le second une demande'
       });
     }
 
     if (offre.statut !== 'ACTIVE' || demande.statut !== 'ACTIVE') {
-      await session.abortTransaction();
       return response.status(400).json({
         message: 'Les deux annonces doivent être actives'
       });
@@ -183,7 +176,6 @@ async function accepterMatching(request, response, next) {
       demande.auteur.equals(request.user._id);
 
     if (!estAuteur) {
-      await session.abortTransaction();
       return response.status(403).json({
         message: 'Vous devez être l\'auteur d\'une des deux annonces'
       });
@@ -193,10 +185,9 @@ async function accepterMatching(request, response, next) {
     const matchingExistant = await Matching.findOne({
       offre: offreId,
       demande: demandeId
-    }).session(session);
+    });
 
     if (matchingExistant && matchingExistant.statut === 'ACCEPTE') {
-      await session.abortTransaction();
       return response.status(409).json({
         message: 'Un matching actif existe déjà entre ces deux annonces'
       });
@@ -220,8 +211,7 @@ async function accepterMatching(request, response, next) {
       {
         upsert: true,
         returnDocument: 'after',
-        runValidators: true,
-        session
+        runValidators: true
       }
     );
 
@@ -236,35 +226,26 @@ async function accepterMatching(request, response, next) {
             date: new Date()
           }
         }
-      },
-      { session }
+      }
     );
 
     // 3. Créer la conversation automatiquement
     // Vérifier si une conversation existe déjà pour ce matching
     const convExistante = await Conversation.findOne({
       matching: matching._id
-    }).session(session);
+    });
 
     let conversation = convExistante;
 
     if (!convExistante) {
-      const [nouvelleConv] = await Conversation.create(
-        [
-          {
-            participants: [offre.auteur, demande.auteur],
-            annonce: offre._id,
-            matching: matching._id,
-            statut: 'ACTIVE',
-            dernierMessageAt: new Date()
-          }
-        ],
-        { session }
-      );
-      conversation = nouvelleConv;
+      conversation = await Conversation.create({
+        participants: [offre.auteur, demande.auteur],
+        annonce: offre._id,
+        matching: matching._id,
+        statut: 'ACTIVE',
+        dernierMessageAt: new Date()
+      });
     }
-
-    await session.commitTransaction();
 
     return response.status(201).json({
       message: 'Matching accepté — conversation créée automatiquement',
@@ -277,10 +258,7 @@ async function accepterMatching(request, response, next) {
       }
     });
   } catch (error) {
-    await session.abortTransaction();
     return next(error);
-  } finally {
-    session.endSession();
   }
 }
 
