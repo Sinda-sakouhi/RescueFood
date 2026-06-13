@@ -946,6 +946,26 @@ coordonnées, la distance, la durée estimée, les dates prévues et réelles,
 `vehicule`, `positionActuelle`, `historiquePositions`, `historiqueStatuts` et
 `itineraireOptimise`.
 
+### Fichiers backend de la partie d'Aziz
+
+Le code logistique contient des commentaires explicatifs avant les fonctions
+principales afin de faciliter sa lecture et sa présentation :
+
+| Fichier | Responsabilité |
+|---|---|
+| `backend/routes/logistiqueRoutes.js` | Routes HTTP et permissions par rôle |
+| `backend/controllers/logistiqueController.js` | Contrôleurs des APIs logistiques, dashboard, carte et PDF |
+| `backend/models/Collecte.js` | Schéma MongoDB d'une mission de collecte |
+| `backend/utils/logistique.js` | Workflow, distance GPS et estimation de durée |
+| `backend/utils/logistiqueIA.js` | Optimisation, risque de retard et recommandation |
+| `backend/test/logistique.test.js` | Tests unitaires de la logique métier et IA |
+
+Ordre conseillé pour présenter le code :
+
+```text
+routes -> contrôleur -> modèle -> utilitaires métier -> IA -> tests
+```
+
 ### Comptes de démonstration
 
 Exemples :

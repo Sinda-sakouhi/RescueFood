@@ -43,6 +43,14 @@ const populateCollecte = [
   }
 ];
 
+/**
+ * Construit le filtre MongoDB correspondant au rôle connecté.
+ * L'administrateur voit tout, tandis que chaque acteur ne voit que les
+ * collectes auxquelles il participe.
+ *
+ * @param {object} user Utilisateur authentifié ajouté par le middleware.
+ * @returns {object} Filtre à fusionner dans les requêtes sur les collectes.
+ */
 function scopeUtilisateur(user) {
   if (user.role === 'ADMIN') return {};
   if (user.role === 'TRANSPORTEUR') return { transporteur: user._id };
@@ -51,10 +59,21 @@ function scopeUtilisateur(user) {
   return { _id: null };
 }
 
+/**
+ * Vérifie qu'une valeur possède le format d'un ObjectId MongoDB.
+ *
+ * @param {string} id Identifiant reçu dans l'URL ou le corps HTTP.
+ * @returns {boolean} Vrai lorsque l'identifiant peut être interrogé.
+ */
 function identifiantValide(id) {
   return mongoose.isValidObjectId(id);
 }
 
+/**
+ * Génère une référence courte et lisible pour une nouvelle collecte.
+ *
+ * @returns {string} Référence au format COL-... utilisée dans l'interface.
+ */
 function construireReference() {
   return `COL-${Date.now().toString(36).toUpperCase()}-${Math.random()
     .toString(36)
@@ -62,11 +81,26 @@ function construireReference() {
     .toUpperCase()}`;
 }
 
+/**
+ * Recherche une collecte en appliquant simultanément son identifiant et les
+ * restrictions d'accès liées au rôle de l'utilisateur.
+ *
+ * @param {string} id Identifiant de la collecte.
+ * @param {object} user Utilisateur authentifié.
+ * @returns {Promise<object|null>} Collecte autorisée ou null.
+ */
 async function trouverCollecteAutorisee(id, user) {
   if (!identifiantValide(id)) return null;
   return Collecte.findOne({ _id: id, ...scopeUtilisateur(user) });
 }
 
+/**
+ * Résume l'activité passée d'un transporteur pour alimenter les scores IA.
+ * En l'absence d'historique, une ponctualité neutre de 80 % est utilisée.
+ *
+ * @param {object[]} collectes Historique des missions du transporteur.
+ * @returns {object} Charge active, ponctualité et expérience de livraison.
+ */
 function calculerStatistiquesTransporteur(collectes) {
   const actives = collectes.filter(({ statut }) =>
     ['PLANIFIEE', 'EN_ROUTE', 'COLLECTEE'].includes(statut)
@@ -91,6 +125,11 @@ function calculerStatistiquesTransporteur(collectes) {
   };
 }
 
+/**
+ * GET /api/logistique/collectes
+ * Liste les collectes visibles par l'utilisateur avec recherche, filtres de
+ * statut et de dates, pagination et transitions de statut possibles.
+ */
 async function listCollectes(request, response, next) {
   try {
     const {
@@ -150,6 +189,11 @@ async function listCollectes(request, response, next) {
   }
 }
 
+/**
+ * GET /api/logistique/collectes/:id
+ * Retourne le détail d'une collecte uniquement si l'utilisateur connecté est
+ * autorisé à la consulter.
+ */
 async function getCollecte(request, response, next) {
   try {
     const collecte = await trouverCollecteAutorisee(
@@ -172,6 +216,11 @@ async function getCollecte(request, response, next) {
   }
 }
 
+/**
+ * GET /api/logistique/transporteurs
+ * Liste les comptes transporteurs validés et calcule leur nombre de missions
+ * actives afin d'aider l'administrateur à répartir la charge.
+ */
 async function listTransporteurs(request, response, next) {
   try {
     const [transporteurs, charges] = await Promise.all([
@@ -206,6 +255,11 @@ async function listTransporteurs(request, response, next) {
   }
 }
 
+/**
+ * POST /api/logistique/collectes
+ * Transforme une donation validée ou réservée en mission logistique. La
+ * distance, la durée, la priorité et le premier statut sont calculés ici.
+ */
 async function createCollecte(request, response, next) {
   try {
     const {
@@ -311,6 +365,11 @@ async function createCollecte(request, response, next) {
   }
 }
 
+/**
+ * PATCH /api/logistique/collectes/:id/assignation
+ * Associe un transporteur validé et son véhicule à une collecte encore
+ * planifiable, puis place la mission au statut PLANIFIEE.
+ */
 async function assignerTransporteur(request, response, next) {
   try {
     const { transporteurId, vehicule = '' } = request.body;
@@ -360,6 +419,11 @@ async function assignerTransporteur(request, response, next) {
   }
 }
 
+/**
+ * PATCH /api/logistique/collectes/:id/statut
+ * Fait avancer la collecte dans le workflow autorisé, conserve une trace dans
+ * l'historique et synchronise le statut de la donation correspondante.
+ */
 async function updateStatut(request, response, next) {
   try {
     const { statut, note = '' } = request.body;
@@ -424,6 +488,11 @@ async function updateStatut(request, response, next) {
   }
 }
 
+/**
+ * PATCH /api/logistique/collectes/:id/position
+ * Enregistre la position GPS courante pendant le transport et conserve les
+ * 250 derniers points afin de permettre le suivi de la mission.
+ */
 async function updatePosition(request, response, next) {
   try {
     const { latitude, longitude } = request.body;
@@ -476,6 +545,11 @@ async function updatePosition(request, response, next) {
   }
 }
 
+/**
+ * POST /api/logistique/ia/itineraire/optimiser
+ * Sélectionne les missions actives d'un transporteur et délègue leur
+ * classement à l'algorithme explicable de proximité, urgence et échéance.
+ */
 async function optimiserItineraire(request, response, next) {
   try {
     const transporteurId =
@@ -574,6 +648,11 @@ async function optimiserItineraire(request, response, next) {
   }
 }
 
+/**
+ * GET /api/logistique/ia/collectes/:id/risque-retard
+ * Évalue le risque de retard à partir de la mission, de la charge du
+ * transporteur et de son historique de ponctualité.
+ */
 async function risqueRetard(request, response, next) {
   try {
     const collecte = await trouverCollecteAutorisee(
@@ -618,6 +697,11 @@ async function risqueRetard(request, response, next) {
   }
 }
 
+/**
+ * GET /api/logistique/ia/collectes/:id/transporteurs-recommandes
+ * Calcule un score explicable pour chaque transporteur validé et retourne le
+ * classement du candidat le plus adapté au moins adapté.
+ */
 async function recommanderTransporteurs(request, response, next) {
   try {
     if (!identifiantValide(request.params.id)) {
@@ -698,6 +782,11 @@ async function recommanderTransporteurs(request, response, next) {
   }
 }
 
+/**
+ * GET /api/logistique/dashboard
+ * Agrège les collectes accessibles en KPIs, activité des sept derniers jours
+ * et alertes opérationnelles pour alimenter le tableau de bord.
+ */
 async function dashboard(request, response, next) {
   try {
     const collectes = await Collecte.find(scopeUtilisateur(request.user))
@@ -783,6 +872,11 @@ async function dashboard(request, response, next) {
   }
 }
 
+/**
+ * GET /api/logistique/carte
+ * Prépare une représentation légère des trajets, positions et transporteurs
+ * que le frontend peut directement afficher sur une carte.
+ */
 async function carte(request, response, next) {
   try {
     const collectes = await Collecte.find({
@@ -819,6 +913,11 @@ async function carte(request, response, next) {
   }
 }
 
+/**
+ * GET /api/logistique/rapport.pdf
+ * Génère à la volée un rapport PDF des cent dernières collectes accessibles
+ * et l'envoie directement dans la réponse HTTP.
+ */
 async function rapportPdf(request, response, next) {
   try {
     const collectes = await Collecte.find(scopeUtilisateur(request.user))

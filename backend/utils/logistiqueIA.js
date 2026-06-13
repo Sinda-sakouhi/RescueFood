@@ -1,23 +1,38 @@
 const { calculerDistanceKm, estimerDureeMinutes } = require('./logistique');
 
+/**
+ * Maintient une valeur dans un intervalle, généralement entre 0 et 1.
+ */
 function borner(valeur, minimum = 0, maximum = 1) {
   return Math.min(maximum, Math.max(minimum, valeur));
 }
 
+/**
+ * Arrondit les scores afin de produire des réponses API faciles à lire.
+ */
 function arrondir(valeur, decimales = 2) {
   const facteur = 10 ** decimales;
   return Math.round(valeur * facteur) / facteur;
 }
 
+/**
+ * Calcule le nombre d'heures restantes avant une date cible.
+ */
 function heuresAvant(date, maintenant = new Date()) {
   if (!date) return 24;
   return (new Date(date) - maintenant) / 3600000;
 }
 
+/**
+ * Convertit le niveau d'urgence métier en score numérique normalisé.
+ */
 function scoreUrgence(urgence) {
   return { ELEVEE: 1, MOYENNE: 0.65, FAIBLE: 0.35 }[urgence] || 0.5;
 }
 
+/**
+ * Donne davantage de poids aux missions dont l'échéance est proche.
+ */
 function scoreEcheance(date, maintenant) {
   const heures = heuresAvant(date, maintenant);
   if (heures <= 2) return 1;
@@ -27,6 +42,10 @@ function scoreEcheance(date, maintenant) {
   return 0.3;
 }
 
+/**
+ * Détermine le prochain point utile d'une collecte. Une mission déjà en cours
+ * repart de sa position GPS actuelle plutôt que de son adresse initiale.
+ */
 function pointDepartCollecte(collecte) {
   if (
     ['EN_ROUTE', 'COLLECTEE'].includes(collecte.statut) &&
@@ -37,6 +56,10 @@ function pointDepartCollecte(collecte) {
   return collecte.localisationDepart;
 }
 
+/**
+ * Additionne les distances d'approche et de livraison d'une tournée dans
+ * l'ordre fourni.
+ */
 function distanceSequence(collectes, positionInitiale) {
   let position = positionInitiale;
   let total = 0;
@@ -53,6 +76,12 @@ function distanceSequence(collectes, positionInitiale) {
   return arrondir(total, 1);
 }
 
+/**
+ * Construit une tournée par choix glouton : à chaque étape, la prochaine
+ * collecte est celle qui maximise proximité, urgence et échéance.
+ *
+ * @returns {object} Ordre proposé, distances avant/après et durée estimée.
+ */
 function optimiserOrdreCollectes(
   collectes,
   positionInitiale,
@@ -114,6 +143,12 @@ function optimiserOrdreCollectes(
   };
 }
 
+/**
+ * Produit un risque de retard explicable en cumulant les facteurs métier :
+ * assignation, échéances, ponctualité, charge active et fraîcheur du GPS.
+ *
+ * @returns {object} Score, pourcentage, niveau, marge et raisons détaillées.
+ */
 function evaluerRisqueRetard(
   collecte,
   {
@@ -200,6 +235,12 @@ function evaluerRisqueRetard(
   };
 }
 
+/**
+ * Évalue l'adéquation d'un transporteur à une collecte avec quatre critères :
+ * proximité, disponibilité, ponctualité et expérience.
+ *
+ * @returns {object} Score global et détail de chaque critère.
+ */
 function scorerTransporteur(
   transporteur,
   collecte,

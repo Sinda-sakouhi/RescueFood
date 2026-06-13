@@ -12,6 +12,7 @@ const {
   scorerTransporteur
 } = require('../utils/logistiqueIA');
 
+// Vérifie que le backend bloque les raccourcis incohérents dans le workflow.
 test('le workflow autorise uniquement les transitions attendues', () => {
   assert.equal(peutTransitionner('PLANIFIEE', 'EN_ROUTE'), true);
   assert.equal(peutTransitionner('PLANIFIEE', 'LIVREE'), false);
@@ -19,6 +20,7 @@ test('le workflow autorise uniquement les transitions attendues', () => {
   assert.deepEqual(prochainsStatuts('COLLECTEE'), ['LIVREE', 'ANNULEE']);
 });
 
+// Contrôle le calcul géographique sur deux coordonnées connues à Tunis.
 test('la distance logistique est calculée en kilomètres', () => {
   const distance = calculerDistanceKm(
     { latitude: 36.7982, longitude: 10.1706 },
@@ -30,6 +32,7 @@ test('la distance logistique est calculée en kilomètres', () => {
   assert.ok(estimerDureeMinutes(distance) >= 10);
 });
 
+// Vérifie que le score de tournée place une mission proche et urgente en tête.
 test('l’optimisation privilégie une collecte proche et urgente', () => {
   const maintenant = new Date('2026-06-13T10:00:00.000Z');
   const resultat = optimiserOrdreCollectes(
@@ -64,6 +67,7 @@ test('l’optimisation privilégie une collecte proche et urgente', () => {
   assert.ok(resultat.distanceOptimiseeKm > 0);
 });
 
+// Reproduit une mission dépassée et chargée pour valider le niveau CRITIQUE.
 test('le risque de retard devient critique pour une collecte dépassée', () => {
   const analyse = evaluerRisqueRetard(
     {
@@ -85,6 +89,7 @@ test('le risque de retard devient critique pour une collecte dépassée', () => 
   assert.ok(analyse.raisons.includes('Heure de collecte prévue dépassée'));
 });
 
+// Compare deux profils afin de valider l'ordre du classement des transporteurs.
 test('la recommandation favorise proximité et disponibilité', () => {
   const collecte = {
     localisationDepart: { latitude: 36.8, longitude: 10.17 }

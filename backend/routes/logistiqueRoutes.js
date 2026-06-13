@@ -18,7 +18,10 @@ const { authenticate, authorizeRoles } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Toutes les routes logistiques exigent d'abord un JWT valide.
 router.use(authenticate);
+
+// Vues de supervision accessibles aux acteurs impliqués dans une collecte.
 router.get(
   '/dashboard',
   authorizeRoles('ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'),
@@ -34,6 +37,8 @@ router.get(
   authorizeRoles('ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'),
   rapportPdf
 );
+
+// Gestion et aide à la décision réservées totalement ou partiellement à l'admin.
 router.get('/transporteurs', authorizeRoles('ADMIN'), listTransporteurs);
 router.post(
   '/ia/itineraire/optimiser',
@@ -50,6 +55,8 @@ router.get(
   authorizeRoles('ADMIN'),
   recommanderTransporteurs
 );
+
+// CRUD opérationnel des collectes avec visibilité filtrée selon le rôle.
 router.get(
   '/collectes',
   authorizeRoles('ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'),
