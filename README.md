@@ -6,6 +6,31 @@ RescueFood est une application de redistribution alimentaire composée de :
 - une API Node.js/Express ;
 - une base MongoDB gérée avec Mongoose.
 
+## Répartition de l'équipe
+
+| Membre | Partie responsable | Branche Git |
+|---|---|---|
+| **Aziz** | Logistique et dashboard | `feature/logistique-dashboard` |
+| **Amal** | Inventaire et catégories | `feature-/inventaires-categorie` |
+| **Sinda** | Annonces et matching | `feature/annonces-matching` |
+
+### Aziz — Logistique et dashboard
+
+Gestion des collectes, assignation des transporteurs, suivi des statuts et des
+positions GPS, cartographie, indicateurs du dashboard, rapports PDF et
+fonctionnalités d'aide à la décision par IA.
+
+### Amal — Inventaire et catégories
+
+Gestion de l'inventaire, des produits, des quantités, des dates de péremption,
+des catégories de donations et des opérations CRUD associées.
+
+### Sinda — Annonces et matching
+
+Publication des offres et des demandes, recherche de correspondances,
+acceptation ou refus des matchings, conversations entre fournisseurs et ONG,
+messagerie et historique des annonces.
+
 ## Installation sous Windows
 
 Toutes les commandes suivantes doivent être exécutées dans **PowerShell**.
