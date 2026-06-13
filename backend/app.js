@@ -3,6 +3,8 @@ const express = require('express');
 const helmet = require('helmet');
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const categorieRoutes = require('./routes/categorieRoutes');
+const donationRoutes = require('./routes/donationRoutes');
 
 const app = express();
 
@@ -19,6 +21,8 @@ app.get('/api/health', (request, response) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/categories', categorieRoutes);
+app.use('/api/donations', donationRoutes);
 
 app.use((request, response) => {
   response.status(404).json({

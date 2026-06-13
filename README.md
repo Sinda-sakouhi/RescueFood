@@ -191,6 +191,17 @@ Authorization: Bearer VOTRE_JWT
 | `GET` | `/api/admin/dashboard` | `ADMIN` | Consulter les statistiques globales |
 | `GET` | `/api/admin/users` | `ADMIN` | Lister tous les utilisateurs |
 | `PATCH` | `/api/admin/users/:id/access` | `ADMIN` | Modifier le rôle ou le statut d'un compte |
+| `GET` | `/api/categories` | Public | Lister toutes les catégories de dons |
+| `GET` | `/api/categories/:id` | Public | Détails d'une catégorie de dons |
+| `POST` | `/api/categories` | `ADMIN` | Créer une catégorie de dons |
+| `PUT` | `/api/categories/:id` | `ADMIN` | Modifier une catégorie de dons |
+| `DELETE` | `/api/categories/:id` | `ADMIN` | Supprimer une catégorie de dons |
+| `GET` | `/api/donations` | Authentifié | Lister les dons (avec filtres) |
+| `GET` | `/api/donations/:id` | Authentifié | Détails d'un don |
+| `POST` | `/api/donations` | `FOURNISSEUR` | Créer un don |
+| `PUT` | `/api/donations/:id` | `FOURNISSEUR`, `ADMIN` | Modifier un don |
+| `PATCH` | `/api/donations/:id/statut` | `ADMIN`, `ONG`, `TRANSPORTEUR` | Changer le statut d'un don |
+| `DELETE` | `/api/donations/:id` | `FOURNISSEUR`, `ADMIN` | Supprimer un don |
 
 ### `GET /api/health`
 
@@ -414,6 +425,285 @@ Réponses principales :
 - `401` : JWT absent ou invalide ;
 - `403` : utilisateur non administrateur ;
 - `404` : utilisateur introuvable.
+
+### `GET /api/categories`
+
+Retourne toutes les catégories de dons disponibles, triées par type de produit.
+
+Réponse `200` :
+
+```json
+{
+  "categories": [
+    {
+      "_id": "OBJECT_ID",
+      "nom": "Fruits et légumes",
+      "description": "Fruits, légumes et produits végétaux frais.",
+      "typeProduit": "FRUITS_LEGUMES",
+      "prioriteRedistribution": "ELEVEE",
+      "dureeConservationEstimee": 5,
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+### `GET /api/categories/:id`
+
+Retourne les détails d'une catégorie spécifique.
+
+Réponses principales :
+
+- `200` : catégorie retournée ;
+- `400` : identifiant invalide ;
+- `404` : catégorie introuvable.
+
+### `POST /api/categories`
+
+Route réservée au rôle `ADMIN`. Crée une nouvelle catégorie de dons.
+
+Corps JSON :
+
+```json
+{
+  "nom": "Produits frais",
+  "description": "Description de la catégorie",
+  "typeProduit": "FRUITS_LEGUMES",
+  "prioriteRedistribution": "ELEVEE",
+  "dureeConservationEstimee": 5
+}
+```
+
+Types de produits autorisés :
+
+```text
+FRUITS_LEGUMES
+PAIN_VIENNOISERIE
+PRODUITS_LAITIERS
+PLATS_PREPARES
+CONSERVES
+BOISSONS
+AUTRE
+```
+
+Réponses principales :
+
+- `201` : catégorie créée ;
+- `400` : données invalides ;
+- `401` : authentification requise ;
+- `403` : utilisateur non administrateur ;
+- `409` : type de produit déjà utilisé.
+
+### `PUT /api/categories/:id`
+
+Route réservée au rôle `ADMIN`. Modifie une catégorie existante.
+
+Corps JSON (tous les champs optionnels) :
+
+```json
+{
+  "nom": "Nouveau nom",
+  "description": "Nouvelle description",
+  "prioriteRedistribution": "MOYENNE",
+  "dureeConservationEstimee": 7
+}
+```
+
+Réponses principales :
+
+- `200` : catégorie mise à jour ;
+- `400` : identifiant ou données invalides ;
+- `401` : authentification requise ;
+- `403` : utilisateur non administrateur ;
+- `404` : catégorie introuvable.
+
+### `DELETE /api/categories/:id`
+
+Route réservée au rôle `ADMIN`. Supprime une catégorie.
+
+Réponses principales :
+
+- `200` : catégorie supprimée ;
+- `400` : identifiant invalide ;
+- `401` : authentification requise ;
+- `403` : utilisateur non administrateur ;
+- `404` : catégorie introuvable.
+
+### `GET /api/donations`
+
+Retourne la liste des dons avec pagination et filtres.
+
+Paramètres de requête (optionnels) :
+
+```text
+statut: CREE, EN_ATTENTE_VALIDATION, VALIDE, RESERVE, EN_COLLECTE, LIVRE, ANNULE
+urgence: FAIBLE, MOYENNE, ELEVEE
+categorie: ObjectId de la catégorie
+fournisseur: ObjectId du fournisseur
+beneficiaire ObjectId du bénéficiaire
+page: numéro de page (défaut: 1)
+limit: nombre par page (défaut: 20)
+```
+
+Réponse `200` :
+
+```json
+{
+  "donations": [
+    {
+      "_id": "OBJECT_ID",
+      "titre": "Lot de fruits frais",
+      "description": "Description du don",
+      "fournisseur": {
+        "_id": "OBJECT_ID",
+        "email": "fournisseur@example.com",
+        "nom": "Dupont",
+        "prenom": "Jean"
+      },
+      "beneficiaire": null,
+      "categorieDonation": {
+        "_id": "OBJECT_ID",
+        "nom": "Fruits et légumes",
+        "typeProduit": "FRUITS_LEGUMES"
+      },
+      "statut": "CREE",
+      "urgence": "ELEVEE",
+      "dateDisponibilite": "2024-01-01T00:00:00.000Z",
+      "dateLimiteCollecte": "2024-01-02T00:00:00.000Z"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 100,
+    "pages": 5
+  }
+}
+```
+
+### `GET /api/donations/:id`
+
+Retourne les détails complets d'un don avec toutes les relations.
+
+Réponses principales :
+
+- `200` : don retourné ;
+- `400` : identifiant invalide ;
+- `401` : authentification requise ;
+- `404` : don introuvable.
+
+### `POST /api/donations`
+
+Route réservée au rôle `FOURNISSEUR`. Crée un nouveau don.
+
+Corps JSON :
+
+```json
+{
+  "titre": "Lot de pains frais",
+  "description": "Pains de la journée non vendus",
+  "categorieDonation": "OBJECT_ID",
+  "compositionLot": "10 baguettes, 5 pains complets",
+  "quantiteEstimee": 15,
+  "unite": "UNITE",
+  "poidsTotalKg": 5.5,
+  "images": ["https://example.com/image1.jpg", "https://example.com/image2.jpg"],
+  "temperatureStockage": 20,
+  "conditionsStockage": "Garder à température ambiante",
+  "urgence": "ELEVEE",
+  "dateDisponibilite": "2024-01-01T18:00:00.000Z",
+  "dateLimiteCollecte": "2024-01-02T10:00:00.000Z",
+  "adresseCollecte": "123 Rue de la Boulangerie, Paris",
+  "localisationCollecte": {
+    "latitude": 48.8566,
+    "longitude": 2.3522
+  }
+}
+```
+
+Unités autorisées :
+
+```text
+KG, G, L, UNITE, PORTION
+```
+
+Réponses principales :
+
+- `201` : don créé ;
+- `400` : données invalides ;
+- `401` : authentification requise ;
+- `403` : utilisateur non fournisseur ;
+- `404` : catégorie introuvable.
+
+### `PUT /api/donations/:id`
+
+Route réservée aux rôles `FOURNISSEUR` et `ADMIN`. Modifie un don existant.
+
+Corps JSON (tous les champs optionnels) :
+
+```json
+{
+  "titre": "Nouveau titre",
+  "description": "Nouvelle description",
+  "urgence": "MOYENNE",
+  "quantiteEstimee": 20
+}
+```
+
+Réponses principales :
+
+- `200` : don mis à jour ;
+- `400` : identifiant ou données invalides ;
+- `401` : authentification requise ;
+- `403` : accès non autorisé ;
+- `404` : don ou catégorie introuvable.
+
+### `PATCH /api/donations/:id/statut`
+
+Route réservée aux rôles `ADMIN`, `ONG` et `TRANSPORTEUR`. Modifie le statut d'un don.
+
+Corps JSON :
+
+```json
+{
+  "statut": "VALIDE"
+}
+```
+
+Statuts autorisés :
+
+```text
+CREE
+EN_ATTENTE_VALIDATION
+VALIDE
+RESERVE
+EN_COLLECTE
+LIVRE
+ANNULE
+```
+
+Réponses principales :
+
+- `200` : statut mis à jour ;
+- `400` : identifiant ou statut invalide ;
+- `401` : authentification requise ;
+- `403` : accès non autorisé ;
+- `404` : don introuvable.
+
+### `DELETE /api/donations/:id`
+
+Route réservée aux rôles `FOURNISSEUR` et `ADMIN`. Supprime un don.
+
+Impossible de supprimer un don avec le statut `EN_COLLECTE` ou `LIVRE`.
+
+Réponses principales :
+
+- `200` : don supprimé ;
+- `400` : identifiant invalide ou don non supprimable ;
+- `401` : authentification requise ;
+- `403` : accès non autorisé ;
+- `404` : don introuvable.
 
 ### Comptes de démonstration
 
