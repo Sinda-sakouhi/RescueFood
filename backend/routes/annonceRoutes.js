@@ -5,7 +5,8 @@ const {
   createAnnonce,
   updateAnnonce,
   deleteAnnonce,
-  mesAnnonces
+  mesAnnonces,
+  suggererCategorieIA
 } = require('../controllers/annonceController');
 const { authenticate, authorizeRoles } = require('../middleware/auth');
 
@@ -13,10 +14,11 @@ const router = express.Router();
 
 // Routes publiques
 router.get('/', listAnnonces);
-router.get('/:id', getAnnonce);
+router.get('/suggestion-categorie', suggererCategorieIA);
 
 // Routes protégées
 router.get('/user/mes-annonces', authenticate, mesAnnonces);
+router.get('/:id', getAnnonce);
 router.post(
   '/',
   authenticate,
