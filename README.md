@@ -203,6 +203,16 @@ Les routes protégées nécessitent cet en-tête :
 Authorization: Bearer VOTRE_JWT
 ```
 
+Toutes les requêtes `POST`, `PUT` ou `PATCH` qui possèdent un corps JSON
+doivent également envoyer :
+
+```text
+Content-Type: application/json
+```
+
+Dans Postman, sélectionner **Body > raw > JSON** et non **Text**. Un corps
+envoyé dans un autre format retourne `415`. Un JSON mal formé retourne `400`.
+
 ### APIs communes et administration
 
 Ces routes transversales ne sont rattachées à aucune branche métier.
