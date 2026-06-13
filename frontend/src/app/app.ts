@@ -174,6 +174,47 @@ interface Transporteur extends Partie {
   collectesActives: number;
 }
 
+interface RisqueRetard {
+  collecteId: string;
+  reference: string;
+  analyse: {
+    score: number;
+    pourcentage: number;
+    niveau: 'FAIBLE' | 'ATTENTION' | 'CRITIQUE';
+    margeMinutes: number | null;
+    raisons: string[];
+  };
+}
+
+interface ItineraireIA {
+  transporteur: { id: string; nom: string };
+  distanceInitialeKm: number;
+  distanceOptimiseeKm: number;
+  gainDistanceKm: number;
+  dureeEstimeeMinutes: number;
+  ordreOptimise: Array<{
+    ordre: number;
+    collecteId: string;
+    reference: string;
+    titre: string;
+    score: number;
+    distanceApprocheKm: number;
+  }>;
+}
+
+interface RecommandationTransporteur {
+  transporteur: {
+    id: string;
+    nom: string;
+    email: string;
+    telephone: string;
+  };
+  score: number;
+  pourcentage: number;
+  distanceKm: number;
+  raisons: string[];
+}
+
 interface DashboardAdmin {
   utilisateurs: {
     total: number;
@@ -279,6 +320,12 @@ export class App implements OnInit, OnDestroy {
   protected readonly vehicule = signal('');
   protected readonly filtreStatut = signal('TOUS');
   protected readonly rechercheCollecte = signal('');
+  protected readonly risquesRetard = signal<Record<string, RisqueRetard>>({});
+  protected readonly itineraireIA = signal<ItineraireIA | null>(null);
+  protected readonly optimisationEnCours = signal(false);
+  protected readonly transporteurIASelectionne = signal('');
+  protected readonly recommandationsTransporteurs =
+    signal<RecommandationTransporteur[]>([]);
   protected readonly dashboardLogistique = signal<DashboardLogistique>(
     this.dashboardLogistiqueVide()
   );
@@ -349,6 +396,20 @@ export class App implements OnInit, OnDestroy {
       1,
       ...this.dashboardLogistique().activite.map(({ livraisons }) => livraisons)
     )
+  );
+
+  protected readonly risquesCritiques = computed(
+    () =>
+      Object.values(this.risquesRetard()).filter(
+        ({ analyse }) => analyse.niveau === 'CRITIQUE'
+      ).length
+  );
+
+  protected readonly risquesAttention = computed(
+    () =>
+      Object.values(this.risquesRetard()).filter(
+        ({ analyse }) => analyse.niveau === 'ATTENTION'
+      ).length
   );
 
   protected readonly couverture = computed(() => {
@@ -661,10 +722,49 @@ export class App implements OnInit, OnDestroy {
     this.collecteSelectionnee.set(collecte);
     this.transporteurSelectionne.set(collecte.transporteur?._id || '');
     this.vehicule.set(collecte.vehicule || '');
+    this.recommandationsTransporteurs.set([]);
+    if (
+      this.utilisateur()?.role === 'ADMIN' &&
+      ['A_ASSIGNER', 'PLANIFIEE'].includes(collecte.statut)
+    ) {
+      this.chargerRecommandations(collecte);
+    }
   }
 
   protected fermerCollecte(): void {
     this.collecteSelectionnee.set(null);
+    this.recommandationsTransporteurs.set([]);
+  }
+
+  protected choisirTransporteurRecommande(
+    recommandation: RecommandationTransporteur
+  ): void {
+    this.transporteurSelectionne.set(recommandation.transporteur.id);
+  }
+
+  protected optimiserTournee(): void {
+    const role = this.utilisateur()?.role;
+    const transporteurId =
+      role === 'ADMIN' ? this.transporteurIASelectionne() : undefined;
+    if (role === 'ADMIN' && !transporteurId) return;
+
+    this.optimisationEnCours.set(true);
+    this.http
+      .post<ItineraireIA>(
+        '/api/logistique/ia/itineraire/optimiser',
+        transporteurId ? { transporteurId } : {},
+        { headers: this.entetes() }
+      )
+      .subscribe({
+        next: (resultat) => {
+          this.itineraireIA.set(resultat);
+          this.optimisationEnCours.set(false);
+        },
+        error: (error) => {
+          this.optimisationEnCours.set(false);
+          this.signaler(error, 'Optimisation indisponible.')
+        }
+      });
   }
 
   protected assigner(): void {
@@ -939,7 +1039,10 @@ export class App implements OnInit, OnDestroy {
         { headers }
       )
       .subscribe({
-        next: ({ collectes }) => this.collectes.set(collectes),
+        next: ({ collectes }) => {
+          this.collectes.set(collectes);
+          this.chargerRisquesRetard(collectes);
+        },
         error: (error) => this.signaler(error, 'Collectes indisponibles.')
       });
     this.http
@@ -958,11 +1061,50 @@ export class App implements OnInit, OnDestroy {
           { headers }
         )
         .subscribe({
-          next: ({ transporteurs }) => this.transporteurs.set(transporteurs),
+          next: ({ transporteurs }) => {
+            this.transporteurs.set(transporteurs);
+            if (!this.transporteurIASelectionne() && transporteurs.length) {
+              this.transporteurIASelectionne.set(transporteurs[0]._id);
+            }
+          },
           error: (error) =>
             this.signaler(error, 'Transporteurs indisponibles.')
         });
     }
+  }
+
+  private chargerRisquesRetard(collectes: Collecte[]): void {
+    this.risquesRetard.set({});
+    for (const collecte of collectes.filter(
+      ({ statut }) => !['LIVREE', 'ANNULEE'].includes(statut)
+    )) {
+      this.http
+        .get<RisqueRetard>(
+          `/api/logistique/ia/collectes/${collecte._id}/risque-retard`,
+          { headers: this.entetes() }
+        )
+        .subscribe({
+          next: (risque) =>
+            this.risquesRetard.update((actuels) => ({
+              ...actuels,
+              [collecte._id]: risque
+            }))
+        });
+    }
+  }
+
+  private chargerRecommandations(collecte: Collecte): void {
+    this.http
+      .get<{ recommandations: RecommandationTransporteur[] }>(
+        `/api/logistique/ia/collectes/${collecte._id}/transporteurs-recommandes`,
+        { headers: this.entetes() }
+      )
+      .subscribe({
+        next: ({ recommandations }) =>
+          this.recommandationsTransporteurs.set(recommandations),
+        error: (error) =>
+          this.signaler(error, 'Recommandations indisponibles.')
+      });
   }
 
   private chargerAdministration(): void {

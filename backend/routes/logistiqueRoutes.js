@@ -7,6 +7,9 @@ const {
   assignerTransporteur,
   updateStatut,
   updatePosition,
+  optimiserItineraire,
+  risqueRetard,
+  recommanderTransporteurs,
   dashboard,
   carte,
   rapportPdf
@@ -32,6 +35,21 @@ router.get(
   rapportPdf
 );
 router.get('/transporteurs', authorizeRoles('ADMIN'), listTransporteurs);
+router.post(
+  '/ia/itineraire/optimiser',
+  authorizeRoles('ADMIN', 'TRANSPORTEUR'),
+  optimiserItineraire
+);
+router.get(
+  '/ia/collectes/:id/risque-retard',
+  authorizeRoles('ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'),
+  risqueRetard
+);
+router.get(
+  '/ia/collectes/:id/transporteurs-recommandes',
+  authorizeRoles('ADMIN'),
+  recommanderTransporteurs
+);
 router.get(
   '/collectes',
   authorizeRoles('ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'),

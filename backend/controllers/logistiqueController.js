@@ -9,6 +9,11 @@ const {
   calculerDistanceKm,
   estimerDureeMinutes
 } = require('../utils/logistique');
+const {
+  optimiserOrdreCollectes,
+  evaluerRisqueRetard,
+  scorerTransporteur
+} = require('../utils/logistiqueIA');
 
 const STATUTS = [
   'A_ASSIGNER',
@@ -60,6 +65,30 @@ function construireReference() {
 async function trouverCollecteAutorisee(id, user) {
   if (!identifiantValide(id)) return null;
   return Collecte.findOne({ _id: id, ...scopeUtilisateur(user) });
+}
+
+function calculerStatistiquesTransporteur(collectes) {
+  const actives = collectes.filter(({ statut }) =>
+    ['PLANIFIEE', 'EN_ROUTE', 'COLLECTEE'].includes(statut)
+  ).length;
+  const livraisonsEvaluees = collectes.filter(
+    ({ statut, dateLivraison, dateLivraisonPrevue }) =>
+      statut === 'LIVREE' && dateLivraison && dateLivraisonPrevue
+  );
+  const ponctuelles = livraisonsEvaluees.filter(
+    ({ dateLivraison, dateLivraisonPrevue }) =>
+      dateLivraison <= dateLivraisonPrevue
+  ).length;
+
+  return {
+    collectesActives: actives,
+    ponctualite: livraisonsEvaluees.length
+      ? ponctuelles / livraisonsEvaluees.length
+      : 0.8,
+    livraisonsTerminees: collectes.filter(
+      ({ statut }) => statut === 'LIVREE'
+    ).length
+  };
 }
 
 async function listCollectes(request, response, next) {
@@ -447,6 +476,228 @@ async function updatePosition(request, response, next) {
   }
 }
 
+async function optimiserItineraire(request, response, next) {
+  try {
+    const transporteurId =
+      request.user.role === 'TRANSPORTEUR'
+        ? request.user._id
+        : request.body.transporteurId;
+    const { collecteIds, positionDepart } = request.body;
+
+    if (!identifiantValide(transporteurId)) {
+      return response.status(400).json({
+        message: 'Un transporteur valide est requis'
+      });
+    }
+    if (
+      positionDepart &&
+      (!Number.isFinite(positionDepart.latitude) ||
+        !Number.isFinite(positionDepart.longitude))
+    ) {
+      return response.status(400).json({
+        message: 'Position de départ invalide'
+      });
+    }
+
+    const transporteur = await User.findOne({
+      _id: transporteurId,
+      role: 'TRANSPORTEUR',
+      statutCompte: 'VALIDE'
+    }).select('nom prenom localisation');
+    if (!transporteur) {
+      return response.status(404).json({
+        message: 'Transporteur disponible introuvable'
+      });
+    }
+
+    const filtre = {
+      transporteur: transporteur._id,
+      statut: { $in: ['PLANIFIEE', 'EN_ROUTE', 'COLLECTEE'] }
+    };
+    if (Array.isArray(collecteIds) && collecteIds.length) {
+      if (collecteIds.some((id) => !identifiantValide(id))) {
+        return response.status(400).json({
+          message: 'Une collecte possède un identifiant invalide'
+        });
+      }
+      filtre._id = { $in: collecteIds };
+    }
+
+    const collectes = await Collecte.find(filtre)
+      .populate('donation', 'titre urgence dateLimiteCollecte')
+      .sort({ dateCollectePrevue: 1 });
+    if (!collectes.length) {
+      return response.status(404).json({
+        message: 'Aucune collecte active à optimiser pour ce transporteur'
+      });
+    }
+
+    const positionInitiale =
+      positionDepart ||
+      transporteur.localisation ||
+      collectes[0].positionActuelle ||
+      collectes[0].localisationDepart;
+    const resultat = optimiserOrdreCollectes(
+      collectes.map((collecte) => collecte.toObject()),
+      positionInitiale
+    );
+
+    return response.json({
+      methode: 'Scoring glouton explicable',
+      ponderations: {
+        proximite: 0.45,
+        urgence: 0.35,
+        echeance: 0.2
+      },
+      transporteur: {
+        id: transporteur.id,
+        nom: `${transporteur.prenom} ${transporteur.nom}`
+      },
+      distanceInitialeKm: resultat.distanceInitialeKm,
+      distanceOptimiseeKm: resultat.distanceOptimiseeKm,
+      gainDistanceKm: resultat.gainDistanceKm,
+      dureeEstimeeMinutes: resultat.dureeEstimeeMinutes,
+      ordreOptimise: resultat.ordre.map(
+        ({ collecte, score, criteres, distanceApprocheKm }, index) => ({
+          ordre: index + 1,
+          collecteId: collecte._id,
+          reference: collecte.reference,
+          titre: collecte.donation?.titre,
+          score: Math.round(score * 100),
+          distanceApprocheKm: Math.round(distanceApprocheKm * 10) / 10,
+          criteres
+        })
+      )
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function risqueRetard(request, response, next) {
+  try {
+    const collecte = await trouverCollecteAutorisee(
+      request.params.id,
+      request.user
+    );
+    if (!collecte) {
+      return response.status(404).json({ message: 'Collecte introuvable' });
+    }
+
+    let statistiques = {
+      collectesActives: 0,
+      ponctualite: 0.8,
+      livraisonsTerminees: 0
+    };
+    if (collecte.transporteur) {
+      const historique = await Collecte.find({
+        transporteur: collecte.transporteur
+      }).select('statut dateLivraison dateLivraisonPrevue');
+      statistiques = calculerStatistiquesTransporteur(historique);
+    }
+
+    const analyse = evaluerRisqueRetard(collecte.toObject(), {
+      ponctualiteTransporteur: statistiques.ponctualite,
+      collectesActivesTransporteur: statistiques.collectesActives
+    });
+
+    return response.json({
+      collecteId: collecte.id,
+      reference: collecte.reference,
+      methode: 'Scoring de risque explicable',
+      analyse,
+      facteurs: {
+        ponctualiteTransporteur: Math.round(statistiques.ponctualite * 100),
+        collectesActivesTransporteur: statistiques.collectesActives,
+        dureeEstimeeMinutes: collecte.dureeEstimeeMinutes,
+        dateLivraisonPrevue: collecte.dateLivraisonPrevue
+      }
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function recommanderTransporteurs(request, response, next) {
+  try {
+    if (!identifiantValide(request.params.id)) {
+      return response.status(400).json({ message: 'Identifiant invalide' });
+    }
+    const collecte = await Collecte.findById(request.params.id).populate(
+      'donation',
+      'titre urgence'
+    );
+    if (!collecte) {
+      return response.status(404).json({ message: 'Collecte introuvable' });
+    }
+    if (!['A_ASSIGNER', 'PLANIFIEE'].includes(collecte.statut)) {
+      return response.status(409).json({
+        message: 'La recommandation est réservée aux collectes à planifier'
+      });
+    }
+
+    const transporteurs = await User.find({
+      role: 'TRANSPORTEUR',
+      statutCompte: 'VALIDE'
+    }).select('nom prenom email telephone localisation adresse');
+    const ids = transporteurs.map(({ _id }) => _id);
+    const historique = await Collecte.find({
+      transporteur: { $in: ids }
+    }).select(
+      'transporteur statut dateLivraison dateLivraisonPrevue'
+    );
+    const historiqueParTransporteur = new Map();
+    for (const mission of historique) {
+      const id = mission.transporteur?.toString();
+      if (!id) continue;
+      if (!historiqueParTransporteur.has(id)) {
+        historiqueParTransporteur.set(id, []);
+      }
+      historiqueParTransporteur.get(id).push(mission);
+    }
+
+    const recommandations = transporteurs
+      .map((transporteur) => {
+        const statistiques = calculerStatistiquesTransporteur(
+          historiqueParTransporteur.get(transporteur.id) || []
+        );
+        const analyse = scorerTransporteur(
+          transporteur.toObject(),
+          collecte.toObject(),
+          statistiques
+        );
+        return {
+          transporteur: {
+            id: transporteur.id,
+            nom: `${transporteur.prenom} ${transporteur.nom}`,
+            email: transporteur.email,
+            telephone: transporteur.telephone
+          },
+          ...analyse
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    return response.json({
+      collecte: {
+        id: collecte.id,
+        reference: collecte.reference,
+        titre: collecte.donation?.titre
+      },
+      methode: 'Classement multicritère explicable',
+      ponderations: {
+        proximite: 0.35,
+        disponibilite: 0.3,
+        ponctualite: 0.25,
+        experience: 0.1
+      },
+      recommandations
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 async function dashboard(request, response, next) {
   try {
     const collectes = await Collecte.find(scopeUtilisateur(request.user))
@@ -650,6 +901,9 @@ module.exports = {
   assignerTransporteur,
   updateStatut,
   updatePosition,
+  optimiserItineraire,
+  risqueRetard,
+  recommanderTransporteurs,
   dashboard,
   carte,
   rapportPdf

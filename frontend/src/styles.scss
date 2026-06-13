@@ -1543,6 +1543,119 @@ input:disabled {
   margin-bottom: 14px;
 }
 
+.ai-logistics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.ai-card {
+  padding-bottom: 17px;
+}
+
+.ai-card > p,
+.ai-card > select,
+.ai-card > button,
+.ai-route-result {
+  margin-right: 17px;
+  margin-left: 17px;
+}
+
+.ai-card > p {
+  color: #748179;
+  font-size: 0.6rem;
+  line-height: 1.7;
+}
+
+.ai-card > select {
+  width: calc(100% - 34px);
+  margin-bottom: 10px;
+}
+
+.ai-badge {
+  padding: 5px 8px;
+  border-radius: 999px;
+  color: #347257;
+  background: #e4f1e8;
+  font-size: 0.52rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ai-risk-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 4px 17px 8px;
+}
+
+.ai-risk-summary strong {
+  color: #183e2c;
+  font-family: Georgia, serif;
+  font-size: 1.7rem;
+}
+
+.ai-risk-summary span {
+  margin-right: 14px;
+  color: #7c8981;
+  font-size: 0.58rem;
+}
+
+.ai-route-result {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #f3f7f3;
+}
+
+.ai-route-result > strong {
+  color: #215f45;
+  font-size: 1rem;
+}
+
+.ai-route-result > span,
+.ai-route-result > small {
+  align-self: center;
+  color: #718078;
+  font-size: 0.57rem;
+}
+
+.ai-route-result > small {
+  grid-column: 1 / -1;
+}
+
+.ai-route-result > div {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 7px;
+  padding-top: 7px;
+  border-top: 1px solid #dfe8e1;
+  font-size: 0.58rem;
+}
+
+.ai-route-result > div b {
+  display: grid;
+  width: 21px;
+  height: 21px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: #2c7557;
+}
+
+.ai-route-result > div i {
+  color: #2c7557;
+  font-style: normal;
+  font-weight: 850;
+}
+
 .map {
   height: 350px;
   background: #e6ece8;
@@ -1670,6 +1783,31 @@ button.data-row:hover {
   font-size: 0.65rem;
 }
 
+.risk-chip {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 3px 5px;
+  border-radius: 999px;
+  font-size: 0.45rem;
+  font-style: normal;
+  vertical-align: middle;
+}
+
+.risk-chip[data-level="FAIBLE"] {
+  color: #287052;
+  background: #e4f1e8;
+}
+
+.risk-chip[data-level="ATTENTION"] {
+  color: #8b6b2e;
+  background: #f5efd9;
+}
+
+.risk-chip[data-level="CRITIQUE"] {
+  color: #a04739;
+  background: #f9e5e0;
+}
+
 .data-row small {
   margin-top: 4px;
   color: #89958e;
@@ -1723,9 +1861,66 @@ button.data-row:hover {
 
 .status-pill[data-status="ANNULEE"],
 .status-pill[data-status="REFUSE"],
-.status-pill[data-status="SUSPENDU"] {
+.status-pill[data-status="SUSPENDU"],
+.status-pill[data-status="CRITIQUE"] {
   color: #a04739;
   background: #f9e5e0;
+}
+
+.status-pill[data-status="ATTENTION"] {
+  color: #8b6b2e;
+  background: #f5efd9;
+}
+
+.ai-explanation p {
+  margin: 7px 0 0;
+  color: #718078;
+  font-size: 0.58rem;
+  line-height: 1.5;
+}
+
+.recommendation-list {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 13px;
+}
+
+.recommendation-list button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px;
+  border: 1px solid #dfe8e1;
+  border-radius: 9px;
+  background: #f8faf8;
+  text-align: left;
+  cursor: pointer;
+}
+
+.recommendation-list button:hover {
+  border-color: #5a9878;
+  background: #eff6f1;
+}
+
+.recommendation-list strong,
+.recommendation-list small {
+  display: block;
+}
+
+.recommendation-list strong {
+  font-size: 0.62rem;
+}
+
+.recommendation-list small {
+  margin-top: 3px;
+  color: #7d8a82;
+  font-size: 0.52rem;
+}
+
+.recommendation-list b {
+  color: #247052;
+  font-size: 0.8rem;
 }
 
 .analytics-grid {
@@ -2259,6 +2454,7 @@ button.data-row:hover {
   .overview-grid,
   .matching-layout,
   .logistics-grid,
+  .ai-logistics-grid,
   .analytics-grid,
   .profile-layout {
     grid-template-columns: 1fr;

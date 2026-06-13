@@ -621,6 +621,74 @@
             </article>
           </section>
 
+          <section class="ai-logistics-grid">
+            <article class="panel ai-card">
+              <div class="panel__header">
+                <div>
+                  <span class="eyebrow">IA prédictive</span>
+                  <h2>Risque de retard</h2>
+                </div>
+                <span class="ai-badge">Explicable</span>
+              </div>
+              <div class="ai-risk-summary">
+                <strong>{{ risquesCritiques() }}</strong>
+                <span>critique(s)</span>
+                <strong>{{ risquesAttention() }}</strong>
+                <span>à surveiller</span>
+              </div>
+              <p>
+                Le score combine marge horaire, ponctualité, charge du
+                transporteur et fraîcheur du GPS.
+              </p>
+            </article>
+
+            @if (["ADMIN", "TRANSPORTEUR"].includes(utilisateur()?.role || "")) {
+              <article class="panel ai-card">
+                <div class="panel__header">
+                  <div>
+                    <span class="eyebrow">IA d’optimisation</span>
+                    <h2>Ordre des collectes</h2>
+                  </div>
+                  <span class="ai-badge">45 · 35 · 20</span>
+                </div>
+                @if (utilisateur()?.role === "ADMIN") {
+                  <select
+                    [ngModel]="transporteurIASelectionne()"
+                    (ngModelChange)="transporteurIASelectionne.set($event)"
+                  >
+                    @for (transporteur of transporteurs(); track transporteur._id) {
+                      <option [value]="transporteur._id">
+                        {{ transporteur.prenom }} {{ transporteur.nom }}
+                      </option>
+                    }
+                  </select>
+                }
+                <button
+                  class="button button--primary button--wide"
+                  type="button"
+                  [disabled]="optimisationEnCours() || (utilisateur()?.role === 'ADMIN' && !transporteurIASelectionne())"
+                  (click)="optimiserTournee()"
+                >
+                  {{ optimisationEnCours() ? "Calcul…" : "Optimiser la tournée" }}
+                </button>
+                @if (itineraireIA(); as itineraire) {
+                  <div class="ai-route-result">
+                    <strong>{{ itineraire.distanceOptimiseeKm }} km</strong>
+                    <span>{{ itineraire.dureeEstimeeMinutes }} min estimées</span>
+                    <small>Gain distance : {{ itineraire.gainDistanceKm }} km</small>
+                    @for (etape of itineraire.ordreOptimise; track etape.collecteId) {
+                      <div>
+                        <b>{{ etape.ordre }}</b>
+                        <span>{{ etape.reference }} · {{ etape.titre }}</span>
+                        <i>{{ etape.score }}%</i>
+                      </div>
+                    }
+                  </div>
+                }
+              </article>
+            }
+          </section>
+
           <section class="logistics-grid">
             <article class="panel map-panel">
               <div class="panel__header">
@@ -696,7 +764,14 @@
               @for (collecte of collectesFiltrees(); track collecte._id) {
                 <button class="data-row logistics-row" type="button" (click)="ouvrirCollecte(collecte)">
                   <span>
-                    <strong>{{ collecte.donation.titre }}</strong>
+                    <strong>
+                      {{ collecte.donation.titre }}
+                      @if (risquesRetard()[collecte._id]; as risque) {
+                        <i class="risk-chip" [attr.data-level]="risque.analyse.niveau">
+                          Retard {{ risque.analyse.pourcentage }}%
+                        </i>
+                      }
+                    </strong>
                     <small>{{ collecte.reference }}</small>
                   </span>
                   <span>
@@ -887,6 +962,9 @@
               <code>GET · POST · PATCH /api/matchings</code>
               <code>GET · POST /api/conversations</code>
               <code>GET · PATCH /api/logistique</code>
+              <code>POST /api/logistique/ia/itineraire/optimiser</code>
+              <code>GET /api/logistique/ia/collectes/:id/risque-retard</code>
+              <code>GET /api/logistique/ia/collectes/:id/transporteurs-recommandes</code>
               <code>GET · PATCH /api/admin</code>
             </div>
           </section>
@@ -979,9 +1057,34 @@
         <span><small>Poids</small><strong>{{ collecte.donation.poidsTotalKg }} kg</strong></span>
       </div>
 
+      @if (risquesRetard()[collecte._id]; as risque) {
+        <section class="drawer-section ai-explanation">
+          <h3>Prédiction du retard · {{ risque.analyse.pourcentage }}%</h3>
+          <i class="status-pill" [attr.data-status]="risque.analyse.niveau">
+            {{ risque.analyse.niveau }}
+          </i>
+          @for (raison of risque.analyse.raisons; track raison) {
+            <p>— {{ raison }}</p>
+          }
+        </section>
+      }
+
       @if (utilisateur()?.role === "ADMIN" && ["A_ASSIGNER", "PLANIFIEE"].includes(collecte.statut)) {
         <section class="drawer-section">
-          <h3>Assignation</h3>
+          <h3>Assignation intelligente</h3>
+          @if (recommandationsTransporteurs().length) {
+            <div class="recommendation-list">
+              @for (recommandation of recommandationsTransporteurs(); track recommandation.transporteur.id) {
+                <button type="button" (click)="choisirTransporteurRecommande(recommandation)">
+                  <span>
+                    <strong>{{ recommandation.transporteur.nom }}</strong>
+                    <small>{{ recommandation.distanceKm }} km · {{ recommandation.raisons[1] }}</small>
+                  </span>
+                  <b>{{ recommandation.pourcentage }}%</b>
+                </button>
+              }
+            </div>
+          }
           <label>
             Transporteur
             <select [ngModel]="transporteurSelectionne()" (ngModelChange)="transporteurSelectionne.set($event)">

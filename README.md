@@ -222,6 +222,9 @@ Authorization: Bearer VOTRE_JWT
 | `GET` | `/api/logistique/carte` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Obtenir les trajets et positions |
 | `GET` | `/api/logistique/rapport.pdf` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Télécharger le rapport PDF |
 | `GET` | `/api/logistique/transporteurs` | `ADMIN` | Lister les transporteurs et leur charge |
+| `POST` | `/api/logistique/ia/itineraire/optimiser` | `ADMIN`, `TRANSPORTEUR` | Optimiser l'ordre des collectes |
+| `GET` | `/api/logistique/ia/collectes/:id/risque-retard` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Prédire le risque de retard |
+| `GET` | `/api/logistique/ia/collectes/:id/transporteurs-recommandes` | `ADMIN` | Classer les transporteurs |
 | `GET` | `/api/logistique/collectes` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Lister les collectes accessibles |
 | `GET` | `/api/logistique/collectes/:id` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Consulter une collecte |
 | `POST` | `/api/logistique/collectes` | `ADMIN` | Planifier une collecte |
@@ -773,6 +776,119 @@ Réponses principales : `200`, `400`, `404`, `409`.
   leur nombre de collectes actives.
 - `GET /api/logistique/rapport.pdf` produit un fichier PDF contenant les 100
   dernières collectes accessibles à l'utilisateur.
+
+### IA logistique explicable
+
+Ces fonctionnalités utilisent des scores multicritères déterministes. Elles ne
+prétendent pas être un modèle entraîné sur un grand historique : chaque score
+est explicable, testable et pourra ensuite être remplacé par un modèle ML.
+
+#### `POST /api/logistique/ia/itineraire/optimiser`
+
+L'administrateur fournit un transporteur. Le transporteur connecté utilise
+automatiquement son propre identifiant.
+
+```json
+{
+  "transporteurId": "OBJECT_ID",
+  "collecteIds": ["OBJECT_ID_OPTIONNEL"],
+  "positionDepart": {
+    "latitude": 36.8065,
+    "longitude": 10.1815
+  }
+}
+```
+
+L'algorithme construit l'ordre des missions actives par itérations :
+
+- proximité avec le prochain départ : 45 % ;
+- urgence alimentaire : 35 % ;
+- proximité de l'échéance : 20 %.
+
+```json
+{
+  "methode": "Scoring glouton explicable",
+  "distanceInitialeKm": 18.4,
+  "distanceOptimiseeKm": 14.1,
+  "gainDistanceKm": 4.3,
+  "dureeEstimeeMinutes": 35,
+  "ordreOptimise": [
+    {
+      "ordre": 1,
+      "collecteId": "OBJECT_ID",
+      "reference": "COL-DEMO-001",
+      "titre": "Cagettes de tomates",
+      "score": 91,
+      "distanceApprocheKm": 2.1
+    }
+  ]
+}
+```
+
+#### `GET /api/logistique/ia/collectes/:id/risque-retard`
+
+Le risque est calculé à partir de la marge avant livraison, du dépassement de
+l'heure prévue, de la ponctualité historique, de la charge du transporteur et
+de l'ancienneté de sa dernière position GPS.
+
+```json
+{
+  "collecteId": "OBJECT_ID",
+  "reference": "COL-DEMO-001",
+  "methode": "Scoring de risque explicable",
+  "analyse": {
+    "score": 0.72,
+    "pourcentage": 72,
+    "niveau": "CRITIQUE",
+    "margeMinutes": -18,
+    "raisons": [
+      "Livraison prédite après l’échéance",
+      "3 missions actives"
+    ]
+  }
+}
+```
+
+Les niveaux sont `FAIBLE` en dessous de 40 %, `ATTENTION` à partir de 40 % et
+`CRITIQUE` à partir de 70 %.
+
+#### `GET /api/logistique/ia/collectes/:id/transporteurs-recommandes`
+
+Cette route administrateur classe les transporteurs validés pour une collecte
+`A_ASSIGNER` ou `PLANIFIEE` :
+
+- proximité du point de collecte : 35 % ;
+- disponibilité selon les missions actives : 30 % ;
+- ponctualité historique : 25 % ;
+- expérience selon les livraisons terminées : 10 %.
+
+```json
+{
+  "methode": "Classement multicritère explicable",
+  "recommandations": [
+    {
+      "transporteur": {
+        "id": "OBJECT_ID",
+        "nom": "Sami Logistique Solidaire"
+      },
+      "score": 0.89,
+      "pourcentage": 89,
+      "distanceKm": 2.4,
+      "criteres": {
+        "proximite": 0.92,
+        "disponibilite": 1,
+        "ponctualite": 0.96,
+        "experience": 0.8
+      },
+      "raisons": [
+        "2.4 km du point de collecte",
+        "0 mission(s) active(s)",
+        "96% de ponctualité"
+      ]
+    }
+  ]
+}
+```
 
 ### Modèle `Collecte`
 
