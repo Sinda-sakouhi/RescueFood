@@ -109,7 +109,7 @@ Cette commande crée les catégories et les données de démonstration :
 - 1 matching automatique ;
 - 1 conversation et 2 messages ;
 - 3 donations ;
-- 2 collectes ;
+- 3 collectes ;
 - 3 analyses IA ;
 - 1 rapport.
 
@@ -191,6 +191,16 @@ Authorization: Bearer VOTRE_JWT
 | `GET` | `/api/admin/dashboard` | `ADMIN` | Consulter les statistiques globales |
 | `GET` | `/api/admin/users` | `ADMIN` | Lister tous les utilisateurs |
 | `PATCH` | `/api/admin/users/:id/access` | `ADMIN` | Modifier le rôle ou le statut d'un compte |
+| `GET` | `/api/logistique/dashboard` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Consulter les KPIs logistiques |
+| `GET` | `/api/logistique/carte` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Obtenir les trajets et positions |
+| `GET` | `/api/logistique/rapport.pdf` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Télécharger le rapport PDF |
+| `GET` | `/api/logistique/transporteurs` | `ADMIN` | Lister les transporteurs et leur charge |
+| `GET` | `/api/logistique/collectes` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Lister les collectes accessibles |
+| `GET` | `/api/logistique/collectes/:id` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Consulter une collecte |
+| `POST` | `/api/logistique/collectes` | `ADMIN` | Planifier une collecte |
+| `PATCH` | `/api/logistique/collectes/:id/assignation` | `ADMIN` | Assigner un transporteur |
+| `PATCH` | `/api/logistique/collectes/:id/statut` | `ADMIN`, `TRANSPORTEUR` | Faire avancer le workflow |
+| `PATCH` | `/api/logistique/collectes/:id/position` | `ADMIN`, `TRANSPORTEUR` | Enregistrer une position GPS |
 
 ### `GET /api/health`
 
@@ -414,6 +424,140 @@ Réponses principales :
 - `401` : JWT absent ou invalide ;
 - `403` : utilisateur non administrateur ;
 - `404` : utilisateur introuvable.
+
+## API logistique
+
+Toutes les routes `/api/logistique` nécessitent un JWT. Un transporteur ne voit
+que ses collectes, un fournisseur celles qu'il expédie et une ONG celles qu'elle
+reçoit. L'administrateur voit l'ensemble du réseau.
+
+Le workflow autorisé est :
+
+```text
+A_ASSIGNER -> PLANIFIEE -> EN_ROUTE -> COLLECTEE -> LIVREE
+```
+
+Une collecte peut être annulée avant sa livraison. Chaque changement est ajouté
+à `historiqueStatuts`. Les positions GPS sont conservées dans
+`historiquePositions` avec un maximum de 250 points.
+
+### `GET /api/logistique/dashboard`
+
+Retourne les KPIs, la répartition par statut, l'activité des sept derniers jours
+et les alertes pour les collectes en retard ou sans transporteur.
+
+Exemple de réponse :
+
+```json
+{
+  "kpis": {
+    "collectesTotal": 3,
+    "collectesActives": 1,
+    "livraisonsTerminees": 1,
+    "poidsLivreKg": 12.5,
+    "dureeMoyenneMinutes": 60,
+    "tauxPonctualite": 100
+  },
+  "parStatut": {
+    "A_ASSIGNER": 1,
+    "PLANIFIEE": 0,
+    "EN_ROUTE": 1,
+    "COLLECTEE": 0,
+    "LIVREE": 1,
+    "ANNULEE": 0
+  },
+  "activite": [],
+  "alertes": []
+}
+```
+
+### `GET /api/logistique/collectes`
+
+Paramètres optionnels :
+
+```text
+statut
+recherche
+dateDebut
+dateFin
+page
+limite
+```
+
+La réponse contient `collectes`, `pagination` et, pour chaque collecte,
+`prochainsStatuts`.
+
+### `POST /api/logistique/collectes`
+
+Crée une collecte depuis une donation `VALIDE` ou `RESERVE` ayant déjà un
+bénéficiaire. La distance et la durée sont estimées automatiquement.
+
+```json
+{
+  "donationId": "OBJECT_ID",
+  "dateCollectePrevue": "2026-06-14T09:00:00.000Z",
+  "dateLivraisonPrevue": "2026-06-14T10:00:00.000Z",
+  "transporteurId": "OBJECT_ID_OPTIONNEL",
+  "vehicule": "Fourgon frigorifique 12"
+}
+```
+
+Réponses principales : `201`, `400`, `404`, `409`.
+
+### `PATCH /api/logistique/collectes/:id/assignation`
+
+```json
+{
+  "transporteurId": "OBJECT_ID",
+  "vehicule": "Fourgon frigorifique 12"
+}
+```
+
+L'utilisateur ciblé doit être un `TRANSPORTEUR` avec un compte `VALIDE`.
+Réponses principales : `200`, `400`, `404`, `409`.
+
+### `PATCH /api/logistique/collectes/:id/statut`
+
+```json
+{
+  "statut": "EN_ROUTE",
+  "note": "Départ confirmé par le transporteur"
+}
+```
+
+Les transitions hors workflow retournent `409` avec `prochainsStatuts`. Le
+statut de la donation passe à `EN_COLLECTE`, `LIVRE` ou revient à `VALIDE`
+selon l'étape.
+
+### `PATCH /api/logistique/collectes/:id/position`
+
+Disponible uniquement pour une collecte `EN_ROUTE` ou `COLLECTEE`.
+
+```json
+{
+  "latitude": 36.8071,
+  "longitude": 10.1764
+}
+```
+
+Réponses principales : `200`, `400`, `404`, `409`.
+
+### Carte, transporteurs et rapport
+
+- `GET /api/logistique/carte` retourne les départs, arrivées, positions
+  courantes, statuts et transporteurs.
+- `GET /api/logistique/transporteurs` retourne les transporteurs validés et
+  leur nombre de collectes actives.
+- `GET /api/logistique/rapport.pdf` produit un fichier PDF contenant les 100
+  dernières collectes accessibles à l'utilisateur.
+
+### Modèle `Collecte`
+
+Le modèle contient notamment : `reference`, `donation`, `transporteur`,
+`fournisseur`, `beneficiaire`, `statut`, `priorite`, les adresses et
+coordonnées, la distance, la durée estimée, les dates prévues et réelles,
+`vehicule`, `positionActuelle`, `historiquePositions`, `historiqueStatuts` et
+`itineraireOptimise`.
 
 ### Comptes de démonstration
 

@@ -3,6 +3,7 @@ const express = require('express');
 const helmet = require('helmet');
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const logistiqueRoutes = require('./routes/logistiqueRoutes');
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.get('/api/health', (request, response) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/logistique', logistiqueRoutes);
 
 app.use((request, response) => {
   response.status(404).json({

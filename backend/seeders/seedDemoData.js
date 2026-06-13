@@ -340,7 +340,7 @@ async function seedDemoData() {
         titre: 'Pommes disponibles cette semaine',
         description: '18 kg de pommes déclassées mais consommables.',
         fournisseur: marche._id,
-        beneficiaire: null,
+        beneficiaire: ongSolidarite._id,
         categorieDonation: categoriesByType.FRUITS_LEGUMES._id,
         compositionLot: 'Pommes rouges et vertes légèrement déclassées.',
         quantiteEstimee: 18,
@@ -409,6 +409,7 @@ async function seedDemoData() {
 
     await Collecte.create([
       {
+        reference: 'COL-DEMO-001',
         donation: donTomates._id,
         transporteur: transporteur._id,
         fournisseur: marche._id,
@@ -421,12 +422,28 @@ async function seedDemoData() {
         distanceKm: 4.8,
         dureeEstimeeMinutes: 22,
         dateCollectePrevue: addDays(0, 14),
+        dateLivraisonPrevue: addDays(0, 15),
+        vehicule: 'Fourgon solidaire 01',
+        positionActuelle: { latitude: 36.8071, longitude: 10.1764 },
+        dernierePositionAt: new Date(),
+        historiquePositions: [
+          {
+            latitude: 36.8071,
+            longitude: 10.1764,
+            enregistreeLe: new Date()
+          }
+        ],
+        historiqueStatuts: [
+          { statut: 'PLANIFIEE', modifiePar: admin._id },
+          { statut: 'EN_ROUTE', modifiePar: transporteur._id }
+        ],
         itineraireOptimise: {
           polyline: 'demo_polyline_tunis_centre',
           scoreOptimisation: 0.91
         }
       },
       {
+        reference: 'COL-DEMO-002',
         donation: donPain._id,
         transporteur: transporteur._id,
         fournisseur: boulangerie._id,
@@ -440,11 +457,47 @@ async function seedDemoData() {
         dureeEstimeeMinutes: 35,
         dateCollectePrevue: addDays(-1, 19),
         dateCollecteReelle: addDays(-1, 19),
+        dateLivraisonPrevue: addDays(-1, 20),
         dateLivraison: addDays(-1, 20),
+        vehicule: 'Fourgon solidaire 01',
+        positionActuelle: ongEntraide.localisation,
+        dernierePositionAt: addDays(-1, 20),
+        historiqueStatuts: [
+          { statut: 'PLANIFIEE', modifiePar: admin._id },
+          { statut: 'EN_ROUTE', modifiePar: transporteur._id },
+          { statut: 'COLLECTEE', modifiePar: transporteur._id },
+          { statut: 'LIVREE', modifiePar: transporteur._id }
+        ],
         itineraireOptimise: {
           polyline: 'demo_polyline_tunis_carthage',
           scoreOptimisation: 0.87
         }
+      },
+      {
+        reference: 'COL-DEMO-003',
+        donation: donPommes._id,
+        transporteur: null,
+        fournisseur: marche._id,
+        beneficiaire: ongSolidarite._id,
+        statut: 'A_ASSIGNER',
+        priorite: 'NORMALE',
+        adresseDepart: marche.adresse,
+        adresseArrivee: ongSolidarite.adresse,
+        localisationDepart: marche.localisation,
+        localisationArrivee: ongSolidarite.localisation,
+        distanceKm: 4.8,
+        dureeEstimeeMinutes: 22,
+        dateCollectePrevue: addDays(1, 10),
+        dateLivraisonPrevue: addDays(1, 11),
+        positionActuelle: marche.localisation,
+        dernierePositionAt: new Date(),
+        historiqueStatuts: [
+          {
+            statut: 'A_ASSIGNER',
+            modifiePar: admin._id,
+            note: 'Collecte en attente d’un transporteur'
+          }
+        ]
       }
     ]);
 
@@ -552,7 +605,7 @@ async function seedDemoData() {
     console.log('- 1 matching automatique');
     console.log('- 1 conversation et 2 messages');
     console.log(`- ${donations.length} donations`);
-    console.log('- 2 collectes');
+    console.log('- 3 collectes');
     console.log('- 3 analyses IA');
     console.log('- 1 rapport');
   } catch (error) {

@@ -1,33 +1,420 @@
-<main class="page">
-  <section class="hero">
-    <span class="eyebrow">Anti-gaspillage alimentaire</span>
-    <h1>RescueFood</h1>
-    <p class="intro">
-      Une base Angular et Express prête à accueillir les fonctionnalités de
-      collecte, de partage et de redistribution des invendus alimentaires.
-    </p>
+@if (!utilisateur()) {
+  <main class="login-shell">
+    <section class="login-visual">
+      <div class="brand brand--light">
+        <span class="brand__mark">R</span>
+        <span>RescueFood</span>
+      </div>
+      <div class="login-visual__content">
+        <span class="eyebrow">Logistique solidaire</span>
+        <h1>Chaque trajet<br />sauve un repas.</h1>
+        <p>
+          Planifiez les collectes, suivez les transporteurs et mesurez l’impact
+          de chaque livraison.
+        </p>
+      </div>
+      <div class="route-preview" aria-hidden="true">
+        <span class="route-preview__point route-preview__point--one"></span>
+        <span class="route-preview__point route-preview__point--two"></span>
+        <span class="route-preview__point route-preview__point--three"></span>
+        <svg viewBox="0 0 560 210" fill="none">
+          <path d="M25 175C132 164 129 58 248 78C357 97 371 38 535 24" />
+        </svg>
+      </div>
+    </section>
 
-    <div class="status" [class.status--online]="apiStatus() === 'online'">
-      <span class="status__dot" aria-hidden="true"></span>
-      <span>{{ statusLabel() }}</span>
-    </div>
-  </section>
+    <section class="login-panel">
+      <form class="login-card" (ngSubmit)="connexion()">
+        <div>
+          <span class="login-card__hint">Espace opérationnel</span>
+          <h2>Bienvenue</h2>
+          <p>Connectez-vous pour piloter les collectes en temps réel.</p>
+        </div>
 
-  <section class="features" aria-label="Fonctionnalités à venir">
-    <article>
-      <span>01</span>
-      <h2>Publier</h2>
-      <p>Signaler rapidement des aliments disponibles près de chez vous.</p>
-    </article>
-    <article>
-      <span>02</span>
-      <h2>Collecter</h2>
-      <p>Réserver les produits et organiser leur récupération.</p>
-    </article>
-    <article>
-      <span>03</span>
-      <h2>Partager</h2>
-      <p>Créer un réseau local plus solidaire et limiter le gaspillage.</p>
-    </article>
-  </section>
-</main>
+        <label>
+          Adresse email
+          <input
+            type="email"
+            name="email"
+            autocomplete="email"
+            [ngModel]="email()"
+            (ngModelChange)="email.set($event)"
+            required
+          />
+        </label>
+        <label>
+          Mot de passe
+          <input
+            type="password"
+            name="motDePasse"
+            autocomplete="current-password"
+            [ngModel]="motDePasse()"
+            (ngModelChange)="motDePasse.set($event)"
+            required
+          />
+        </label>
+
+        @if (erreur()) {
+          <p class="form-error">{{ erreur() }}</p>
+        }
+
+        <button class="button button--primary button--wide" type="submit">
+          {{ chargementConnexion() ? "Connexion…" : "Accéder au dashboard" }}
+        </button>
+        <p class="demo-note">
+          Le compte administrateur de démonstration est prérempli.
+        </p>
+      </form>
+    </section>
+  </main>
+} @else {
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand__mark">R</span>
+        <span>RescueFood</span>
+      </div>
+
+      <nav class="nav" aria-label="Navigation principale">
+        <a class="nav__item nav__item--active" href="#dashboard">
+          <span class="nav__icon">⌂</span>
+          Vue d’ensemble
+        </a>
+        <a class="nav__item" href="#collectes">
+          <span class="nav__icon">↗</span>
+          Collectes
+          <span class="nav__count">{{ dashboard().kpis.collectesActives }}</span>
+        </a>
+        <a class="nav__item" href="#carte">
+          <span class="nav__icon">⌖</span>
+          Carte en direct
+        </a>
+        <a class="nav__item" href="#analytics">
+          <span class="nav__icon">▥</span>
+          Analytics
+        </a>
+      </nav>
+
+      <div class="sidebar__impact">
+        <span class="sidebar__impact-icon">♧</span>
+        <strong>{{ dashboard().kpis.poidsLivreKg }} kg</strong>
+        <p>de nourriture redistribuée grâce aux livraisons.</p>
+      </div>
+
+      <button class="profile" type="button" (click)="deconnexion()">
+        <span class="profile__avatar">{{ initiales() }}</span>
+        <span>
+          <strong>{{ utilisateur()?.prenom }} {{ utilisateur()?.nom }}</strong>
+          <small>{{ utilisateur()?.role }}</small>
+        </span>
+        <span class="profile__logout">↪</span>
+      </button>
+    </aside>
+
+    <main class="workspace" id="dashboard">
+      <header class="topbar">
+        <div>
+          <span class="eyebrow">{{ dateDuJour }}</span>
+          <h1>Bonjour, {{ utilisateur()?.prenom }}.</h1>
+          <p>Voici l’état du réseau logistique aujourd’hui.</p>
+        </div>
+        <div class="topbar__actions">
+          <button class="icon-button" type="button" title="Actualiser" (click)="chargerDonnees()">
+            ↻
+          </button>
+          <button class="button button--secondary" type="button" (click)="telechargerRapport()">
+            ↓ Rapport PDF
+          </button>
+          <button class="button button--primary" type="button" (click)="filtreStatut.set('A_ASSIGNER')">
+            + Planifier
+          </button>
+        </div>
+      </header>
+
+      @if (erreur()) {
+        <div class="alert-banner">
+          <span>{{ erreur() }}</span>
+          <button type="button" (click)="erreur.set('')">×</button>
+        </div>
+      }
+
+      <section class="kpi-grid" aria-label="Indicateurs logistiques">
+        <article class="kpi-card">
+          <span class="kpi-card__icon kpi-card__icon--green">↗</span>
+          <span class="kpi-card__label">Collectes actives</span>
+          <strong>{{ dashboard().kpis.collectesActives }}</strong>
+          <small>{{ dashboard().parStatut["EN_ROUTE"] || 0 }} en route</small>
+        </article>
+        <article class="kpi-card">
+          <span class="kpi-card__icon kpi-card__icon--orange">✓</span>
+          <span class="kpi-card__label">Livraisons terminées</span>
+          <strong>{{ dashboard().kpis.livraisonsTerminees }}</strong>
+          <small>{{ dashboard().kpis.poidsLivreKg }} kg redistribués</small>
+        </article>
+        <article class="kpi-card">
+          <span class="kpi-card__icon kpi-card__icon--blue">◷</span>
+          <span class="kpi-card__label">Durée moyenne</span>
+          <strong>{{ dashboard().kpis.dureeMoyenneMinutes }} min</strong>
+          <small>De collecte à livraison</small>
+        </article>
+        <article class="kpi-card">
+          <span class="kpi-card__icon kpi-card__icon--purple">◎</span>
+          <span class="kpi-card__label">Taux de ponctualité</span>
+          <strong>{{ dashboard().kpis.tauxPonctualite }}%</strong>
+          <small>Objectif mensuel : 95%</small>
+        </article>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="panel map-panel" id="carte">
+          <div class="panel__header">
+            <div>
+              <span class="panel__eyebrow">Suivi opérationnel</span>
+              <h2>Carte des collectes</h2>
+            </div>
+            <div class="map-legend">
+              <span><i class="dot dot--green"></i> Départ</span>
+              <span><i class="dot dot--orange"></i> Arrivée</span>
+              <span><i class="dot dot--dark"></i> En route</span>
+            </div>
+          </div>
+          <div #mapContainer class="map"></div>
+        </article>
+
+        <article class="panel alerts-panel">
+          <div class="panel__header">
+            <div>
+              <span class="panel__eyebrow">À traiter</span>
+              <h2>Alertes</h2>
+            </div>
+            <span class="panel__count">{{ dashboard().alertes.length }}</span>
+          </div>
+          <div class="alert-list">
+            @for (alerte of dashboard().alertes; track alerte.id) {
+              <button
+                class="alert-item"
+                type="button"
+                (click)="ouvrirCollecte(collectes().find(c => c._id === alerte.id)!)"
+              >
+                <span
+                  class="alert-item__signal"
+                  [class.alert-item__signal--critical]="alerte.niveau === 'CRITIQUE'"
+                >!</span>
+                <span>
+                  <strong>{{ alerte.titre }}</strong>
+                  <small>{{ alerte.message }}</small>
+                </span>
+                <span>›</span>
+              </button>
+            } @empty {
+              <div class="empty-state">
+                <span>✓</span>
+                <strong>Tout est sous contrôle</strong>
+                <p>Aucune alerte logistique active.</p>
+              </div>
+            }
+          </div>
+        </article>
+      </section>
+
+      <section class="panel collections-panel" id="collectes">
+        <div class="panel__header panel__header--wrap">
+          <div>
+            <span class="panel__eyebrow">Flux des dons</span>
+            <h2>Collectes récentes</h2>
+          </div>
+          <div class="collection-tools">
+            <label class="search">
+              <span>⌕</span>
+              <input
+                type="search"
+                placeholder="Rechercher une collecte"
+                [ngModel]="recherche()"
+                (ngModelChange)="recherche.set($event)"
+              />
+            </label>
+            <select
+              aria-label="Filtrer par statut"
+              [ngModel]="filtreStatut()"
+              (ngModelChange)="filtreStatut.set($event)"
+            >
+              @for (statut of ["TOUS", "A_ASSIGNER", "PLANIFIEE", "EN_ROUTE", "COLLECTEE", "LIVREE"]; track statut) {
+                <option [value]="statut">{{ libelleStatut(statut) }}</option>
+              }
+            </select>
+          </div>
+        </div>
+
+        <div class="collection-table">
+          <div class="collection-row collection-row--head">
+            <span>Collecte</span>
+            <span>Trajet</span>
+            <span>Transporteur</span>
+            <span>Planification</span>
+            <span>Statut</span>
+            <span></span>
+          </div>
+          @for (collecte of collectesFiltrees(); track collecte._id) {
+            <button class="collection-row" type="button" (click)="ouvrirCollecte(collecte)">
+              <span class="collection-main">
+                <i [class.collection-main__urgent]="collecte.priorite === 'URGENTE'"></i>
+                <span>
+                  <strong>{{ collecte.donation.titre }}</strong>
+                  <small>{{ collecte.reference }}</small>
+                </span>
+              </span>
+              <span class="route-cell">
+                <strong>{{ collecte.distanceKm }} km</strong>
+                <small>{{ collecte.adresseDepart }} → {{ collecte.adresseArrivee }}</small>
+              </span>
+              <span>
+                @if (collecte.transporteur) {
+                  <strong>{{ collecte.transporteur.prenom }} {{ collecte.transporteur.nom }}</strong>
+                  <small>{{ collecte.vehicule || "Véhicule non renseigné" }}</small>
+                } @else {
+                  <span class="unassigned">Non assigné</span>
+                }
+              </span>
+              <span>
+                <strong>{{ dateCourte(collecte.dateCollectePrevue) }}</strong>
+                <small>{{ collecte.dureeEstimeeMinutes }} min estimées</small>
+              </span>
+              <span>
+                <i class="status-pill" [attr.data-status]="collecte.statut">
+                  {{ libelleStatut(collecte.statut) }}
+                </i>
+              </span>
+              <span class="row-arrow">›</span>
+            </button>
+          } @empty {
+            <div class="table-empty">Aucune collecte ne correspond à ces filtres.</div>
+          }
+        </div>
+      </section>
+
+      <section class="analytics-grid" id="analytics">
+        <article class="panel activity-panel">
+          <div class="panel__header">
+            <div>
+              <span class="panel__eyebrow">7 derniers jours</span>
+              <h2>Livraisons finalisées</h2>
+            </div>
+          </div>
+          <div class="bar-chart">
+            @for (point of dashboard().activite; track point.date) {
+              <div class="bar-chart__item">
+                <span>{{ point.livraisons }}</span>
+                <i [style.height.%]="(point.livraisons / maximumActivite()) * 100"></i>
+                <small>{{ jourCourt(point.date) }}</small>
+              </div>
+            }
+          </div>
+        </article>
+
+        <article class="panel status-panel">
+          <div class="panel__header">
+            <div>
+              <span class="panel__eyebrow">Répartition</span>
+              <h2>État des collectes</h2>
+            </div>
+          </div>
+          @for (statut of ["A_ASSIGNER", "PLANIFIEE", "EN_ROUTE", "COLLECTEE", "LIVREE"]; track statut) {
+            <div class="status-line">
+              <span><i [attr.data-status]="statut"></i>{{ libelleStatut(statut) }}</span>
+              <strong>{{ dashboard().parStatut[statut] || 0 }}</strong>
+            </div>
+          }
+        </article>
+      </section>
+    </main>
+  </div>
+
+  @if (collecteSelectionnee(); as collecte) {
+    <div class="drawer-backdrop" (click)="fermerCollecte()"></div>
+    <aside class="drawer">
+      <button class="drawer__close" type="button" (click)="fermerCollecte()">×</button>
+      <span class="panel__eyebrow">{{ collecte.reference }}</span>
+      <h2>{{ collecte.donation.titre }}</h2>
+      <span class="status-pill" [attr.data-status]="collecte.statut">
+        {{ libelleStatut(collecte.statut) }}
+      </span>
+
+      <div class="drawer__route">
+        <div>
+          <i></i>
+          <span><small>Départ</small><strong>{{ collecte.adresseDepart }}</strong></span>
+        </div>
+        <div>
+          <i></i>
+          <span><small>Arrivée</small><strong>{{ collecte.adresseArrivee }}</strong></span>
+        </div>
+      </div>
+
+      <div class="drawer__stats">
+        <span><small>Distance</small><strong>{{ collecte.distanceKm }} km</strong></span>
+        <span><small>Durée prévue</small><strong>{{ collecte.dureeEstimeeMinutes }} min</strong></span>
+        <span><small>Poids</small><strong>{{ collecte.donation.poidsTotalKg || 0 }} kg</strong></span>
+      </div>
+
+      @if (utilisateur()?.role === "ADMIN" && ["A_ASSIGNER", "PLANIFIEE"].includes(collecte.statut)) {
+        <div class="drawer__section">
+          <h3>Assignation</h3>
+          <label>
+            Transporteur
+            <select
+              [ngModel]="transporteurSelectionne()"
+              (ngModelChange)="transporteurSelectionne.set($event)"
+            >
+              <option value="">Choisir un transporteur</option>
+              @for (transporteur of transporteurs(); track transporteur._id) {
+                <option [value]="transporteur._id">
+                  {{ transporteur.prenom }} {{ transporteur.nom }} · {{ transporteur.collectesActives }} active(s)
+                </option>
+              }
+            </select>
+          </label>
+          <label>
+            Véhicule
+            <input
+              type="text"
+              placeholder="Ex. Fourgon frigorifique 12"
+              [ngModel]="vehicule()"
+              (ngModelChange)="vehicule.set($event)"
+            />
+          </label>
+          <button
+            class="button button--primary button--wide"
+            type="button"
+            [disabled]="!transporteurSelectionne()"
+            (click)="assigner()"
+          >
+            Confirmer l’assignation
+          </button>
+        </div>
+      }
+
+      @if (["ADMIN", "TRANSPORTEUR"].includes(utilisateur()?.role || "") && statutsActionnables(collecte).length) {
+        <div class="drawer__section">
+          <h3>Faire avancer la collecte</h3>
+          <div class="drawer__actions">
+            @for (statut of statutsActionnables(collecte); track statut) {
+              <button
+                class="button"
+                [class.button--primary]="statut !== 'ANNULEE'"
+                [class.button--danger]="statut === 'ANNULEE'"
+                type="button"
+                (click)="avancerStatut(collecte, statut)"
+              >
+                {{ libelleStatut(statut) }}
+              </button>
+            }
+          </div>
+        </div>
+      }
+    </aside>
+  }
+
+  @if (chargement()) {
+    <div class="loading-overlay"><span></span><p>Mise à jour du réseau…</p></div>
+  }
+}
