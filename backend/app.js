@@ -7,6 +7,8 @@ const annonceRoutes = require('./routes/annonceRoutes');
 const matchingRoutes = require('./routes/matchingRoutes');
 const conversationRoutes = require('./routes/conversationRoutes');
 const logistiqueRoutes = require('./routes/logistiqueRoutes');
+const categorieRoutes = require('./routes/categorieRoutes');
+const donationRoutes = require('./routes/donationRoutes');
 const app = express();
 
 app.use(helmet());
@@ -26,6 +28,8 @@ app.use('/api/annonces', annonceRoutes);
 app.use('/api/matchings', matchingRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/logistique', logistiqueRoutes);
+app.use('/api/categories', categorieRoutes);
+app.use('/api/donations', donationRoutes);
 app.use((request, response) => {
   response.status(404).json({
     message: 'Route introuvable'
