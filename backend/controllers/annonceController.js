@@ -1,6 +1,8 @@
 const mongoose = require('mongoose');
 const Annonce = require('../models/Annonce');
-require('../models/CategorieDonation');
+const CategorieDonation = require('../models/CategorieDonation');
+const { suggererCategorie } = require('../utils/categorieIA');
+const { calculerUrgence } = require('../utils/urgenceIA');
 
 // GET /api/annonces — liste toutes les annonces actives
 async function listAnnonces(request, response, next) {
@@ -50,14 +52,14 @@ async function createAnnonce(request, response, next) {
       type,
       titre,
       description,
-      categorieDonation,
       quantiteEstimee,
       unite,
-      urgence,
       adresse,
       localisation,
       dateExpiration
     } = request.body;
+
+    let { categorieDonation } = request.body;
 
     // Vérification rôle : FOURNISSEUR publie OFFRE, ONG publie DEMANDE
     if (type === 'OFFRE' && request.user.role !== 'FOURNISSEUR') {
@@ -71,6 +73,16 @@ async function createAnnonce(request, response, next) {
         message: 'Seule une ONG peut publier une demande'
       });
     }
+
+    // IA 1 — Suggérer catégorie si non fournie
+    if (!categorieDonation) {
+      const typeSuggere = suggererCategorie(titre, description);
+      const cat = await CategorieDonation.findOne({ typeProduit: typeSuggere });
+      if (cat) categorieDonation = cat._id;
+    }
+
+    // IA 2 — Calculer urgence automatiquement selon la date d'expiration
+    const { urgence, raison } = calculerUrgence(dateExpiration);
 
     const annonce = await Annonce.create({
       auteur: request.user._id,
@@ -89,7 +101,11 @@ async function createAnnonce(request, response, next) {
 
     return response.status(201).json({
       message: 'Annonce publiée avec succès',
-      annonce
+      annonce,
+      ia: {
+        urgenceCalculee: urgence,
+        raison
+      }
     });
   } catch (error) {
     return next(error);
@@ -191,11 +207,40 @@ async function mesAnnonces(request, response, next) {
   }
 }
 
+// GET /api/annonces/suggestion-categorie?titre=...&description=...
+async function suggererCategorieIA(request, response, next) {
+  try {
+    const { titre, description = '' } = request.query;
+
+    if (!titre) {
+      return response.status(400).json({ message: 'Le titre est requis' });
+    }
+
+    const categorieSuggeree = suggererCategorie(titre, description);
+
+    const categorie = await CategorieDonation.findOne({
+      typeProduit: categorieSuggeree
+    });
+
+    return response.json({
+      message: "Catégorie suggérée par l'IA",
+      suggestion: {
+        typeProduit: categorieSuggeree,
+        categorie: categorie || null,
+        confidence: 'basé sur analyse des mots-clés'
+      }
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   listAnnonces,
   getAnnonce,
   createAnnonce,
   updateAnnonce,
   deleteAnnonce,
-  mesAnnonces
+  mesAnnonces,
+  suggererCategorieIA
 };
