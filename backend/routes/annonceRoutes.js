@@ -18,7 +18,6 @@ router.get('/suggestion-categorie', suggererCategorieIA);
 
 // Routes protégées
 router.get('/user/mes-annonces', authenticate, mesAnnonces);
-router.get('/:id', getAnnonce);
 router.post(
   '/',
   authenticate,
@@ -37,5 +36,6 @@ router.delete(
   authorizeRoles('FOURNISSEUR', 'ONG', 'ADMIN'),
   deleteAnnonce
 );
+router.get('/:id', getAnnonce);
 
 module.exports = router;

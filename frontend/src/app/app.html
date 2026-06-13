@@ -1,69 +1,88 @@
 @if (!utilisateur()) {
   <main class="login-shell">
-    <section class="login-visual">
+    <section class="login-story">
       <div class="brand brand--light">
         <span class="brand__mark">R</span>
         <span>RescueFood</span>
       </div>
-      <div class="login-visual__content">
-        <span class="eyebrow">Logistique solidaire</span>
-        <h1>Chaque trajet<br />sauve un repas.</h1>
+      <div class="login-story__content">
+        <span class="eyebrow">Plateforme anti-gaspillage</span>
+        <h1>Du surplus<br />à la solidarité.</h1>
         <p>
-          Planifiez les collectes, suivez les transporteurs et mesurez l’impact
-          de chaque livraison.
+          Publier, matcher, échanger, collecter et mesurer l’impact depuis une
+          seule interface.
         </p>
+        <div class="flow-line">
+          <span>Annonce</span><i></i><span>Matching</span><i></i
+          ><span>Don</span><i></i><span>Livraison</span>
+        </div>
       </div>
-      <div class="route-preview" aria-hidden="true">
-        <span class="route-preview__point route-preview__point--one"></span>
-        <span class="route-preview__point route-preview__point--two"></span>
-        <span class="route-preview__point route-preview__point--three"></span>
-        <svg viewBox="0 0 560 210" fill="none">
-          <path d="M25 175C132 164 129 58 248 78C357 97 371 38 535 24" />
-        </svg>
+      <div class="login-story__stats">
+        <span><strong>{{ annonces().length }}</strong> annonces actives</span>
+        <span><strong>{{ categories().length }}</strong> catégories</span>
+        <span><strong>5</strong> rôles à tester</span>
       </div>
     </section>
 
     <section class="login-panel">
       <form class="login-card" (ngSubmit)="connexion()">
         <div>
-          <span class="login-card__hint">Espace opérationnel</span>
-          <h2>Bienvenue</h2>
-          <p>Connectez-vous pour piloter les collectes en temps réel.</p>
+          <span class="eyebrow">Environnement de démonstration</span>
+          <h2>Choisissez un rôle</h2>
+          <p>Chaque compte ouvre les fonctionnalités qui lui sont autorisées.</p>
         </div>
 
-        <label>
-          Adresse email
-          <input
-            type="email"
-            name="email"
-            autocomplete="email"
-            [ngModel]="email()"
-            (ngModelChange)="email.set($event)"
-            required
-          />
-        </label>
-        <label>
-          Mot de passe
-          <input
-            type="password"
-            name="motDePasse"
-            autocomplete="current-password"
-            [ngModel]="motDePasse()"
-            (ngModelChange)="motDePasse.set($event)"
-            required
-          />
-        </label>
+        <div class="demo-accounts">
+          @for (compte of comptesDemo; track compte.email) {
+            <button
+              class="demo-account"
+              [class.demo-account--selected]="email() === compte.email"
+              type="button"
+              (click)="choisirCompte(compte)"
+            >
+              <span class="demo-account__avatar">{{
+                compte.role.slice(0, 2)
+              }}</span>
+              <span>
+                <strong>{{ compte.label }}</strong>
+                <small>{{ compte.description }}</small>
+              </span>
+              <i>›</i>
+            </button>
+          }
+        </div>
+
+        <div class="login-fields">
+          <label>
+            Adresse email
+            <input
+              type="email"
+              name="email"
+              [ngModel]="email()"
+              (ngModelChange)="email.set($event)"
+              required
+            />
+          </label>
+          <label>
+            Mot de passe
+            <input
+              type="password"
+              name="motDePasse"
+              [ngModel]="motDePasse()"
+              (ngModelChange)="motDePasse.set($event)"
+              required
+            />
+          </label>
+        </div>
 
         @if (erreur()) {
-          <p class="form-error">{{ erreur() }}</p>
+          <p class="form-message form-message--error">{{ erreur() }}</p>
         }
 
         <button class="button button--primary button--wide" type="submit">
-          {{ chargementConnexion() ? "Connexion…" : "Accéder au dashboard" }}
+          {{ chargementConnexion() ? "Connexion…" : "Ouvrir l’espace de test" }}
         </button>
-        <p class="demo-note">
-          Le compte administrateur de démonstration est prérempli.
-        </p>
+        <p class="demo-note">Mot de passe commun : <code>Demo1234!</code></p>
       </form>
     </section>
   </main>
@@ -75,297 +94,898 @@
         <span>RescueFood</span>
       </div>
 
-      <nav class="nav" aria-label="Navigation principale">
-        <a class="nav__item nav__item--active" href="#dashboard">
-          <span class="nav__icon">⌂</span>
-          Vue d’ensemble
-        </a>
-        <a class="nav__item" href="#collectes">
-          <span class="nav__icon">↗</span>
-          Collectes
-          <span class="nav__count">{{ dashboard().kpis.collectesActives }}</span>
-        </a>
-        <a class="nav__item" href="#carte">
-          <span class="nav__icon">⌖</span>
-          Carte en direct
-        </a>
-        <a class="nav__item" href="#analytics">
-          <span class="nav__icon">▥</span>
-          Analytics
-        </a>
-      </nav>
-
-      <div class="sidebar__impact">
-        <span class="sidebar__impact-icon">♧</span>
-        <strong>{{ dashboard().kpis.poidsLivreKg }} kg</strong>
-        <p>de nourriture redistribuée grâce aux livraisons.</p>
-      </div>
-
-      <button class="profile" type="button" (click)="deconnexion()">
-        <span class="profile__avatar">{{ initiales() }}</span>
+      <div class="role-card">
+        <span class="profile-avatar">{{ initiales() }}</span>
         <span>
           <strong>{{ utilisateur()?.prenom }} {{ utilisateur()?.nom }}</strong>
           <small>{{ utilisateur()?.role }}</small>
         </span>
-        <span class="profile__logout">↪</span>
+      </div>
+
+      <nav class="nav" aria-label="Navigation principale">
+        @for (item of navigation(); track item.id) {
+          <button
+            class="nav__item"
+            [class.nav__item--active]="section() === item.id"
+            type="button"
+            (click)="naviguer(item.id)"
+          >
+            <span class="nav__icon">{{ item.icon }}</span>
+            <span>{{ item.label }}</span>
+            @if (item.id === "messages" && conversations().length) {
+              <i class="nav__count">{{ conversations().length }}</i>
+            }
+            @if (item.id === "logistique" && dashboardLogistique().kpis.collectesActives) {
+              <i class="nav__count">{{
+                dashboardLogistique().kpis.collectesActives
+              }}</i>
+            }
+          </button>
+        }
+      </nav>
+
+      <div class="sidebar__coverage">
+        <span>Couverture API</span>
+        <strong>7 / 7 modules</strong>
+        <i><b style="width: 100%"></b></i>
+        <small>CRUD donations désormais disponible</small>
+      </div>
+
+      <button class="logout-button" type="button" (click)="deconnexion()">
+        <span>↪</span> Se déconnecter
       </button>
     </aside>
 
-    <main class="workspace" id="dashboard">
+    <main class="workspace">
       <header class="topbar">
         <div>
           <span class="eyebrow">{{ dateDuJour }}</span>
-          <h1>Bonjour, {{ utilisateur()?.prenom }}.</h1>
-          <p>Voici l’état du réseau logistique aujourd’hui.</p>
+          @switch (section()) {
+            @case ("overview") {
+              <h1>Vue générale</h1>
+              <p>Le parcours complet de RescueFood en un coup d’œil.</p>
+            }
+            @case ("annonces") {
+              <h1>Annonces</h1>
+              <p>Offres de surplus et demandes des associations.</p>
+            }
+            @case ("matching") {
+              <h1>Matching intelligent</h1>
+              <p>Les meilleures correspondances entre offre et besoin.</p>
+            }
+            @case ("messages") {
+              <h1>Messagerie</h1>
+              <p>Coordonnez la remise du don avec votre partenaire.</p>
+            }
+            @case ("logistique") {
+              <h1>Logistique</h1>
+              <p>Planification, suivi terrain et indicateurs.</p>
+            }
+            @case ("admin") {
+              <h1>Administration</h1>
+              <p>Comptes, rôles et état global de la plateforme.</p>
+            }
+            @case ("profile") {
+              <h1>Mon profil</h1>
+              <p>Informations de contact et localisation.</p>
+            }
+            @case ("diagnostic") {
+              <h1>Diagnostic fonctionnel</h1>
+              <p>Vérifiez ce qui est exposé et testable pour ce rôle.</p>
+            }
+          }
         </div>
         <div class="topbar__actions">
-          <button class="icon-button" type="button" title="Actualiser" (click)="chargerDonnees()">
+          <button class="icon-button" type="button" title="Actualiser" (click)="chargerTout()">
             ↻
           </button>
-          <button class="button button--secondary" type="button" (click)="telechargerRapport()">
-            ↓ Rapport PDF
-          </button>
-          <button class="button button--primary" type="button" (click)="filtreStatut.set('A_ASSIGNER')">
-            + Planifier
-          </button>
+          @if (section() === "annonces" && peutPublier()) {
+            <button class="button button--primary" type="button" (click)="ouvrirFormulaireAnnonce()">
+              + Nouvelle annonce
+            </button>
+          }
+          @if (section() === "logistique") {
+            <button class="button button--secondary" type="button" (click)="telechargerRapport()">
+              ↓ Rapport PDF
+            </button>
+          }
         </div>
       </header>
 
       @if (erreur()) {
-        <div class="alert-banner">
+        <div class="toast toast--error">
           <span>{{ erreur() }}</span>
           <button type="button" (click)="erreur.set('')">×</button>
         </div>
       }
+      @if (succes()) {
+        <div class="toast toast--success">
+          <span>✓ {{ succes() }}</span>
+          <button type="button" (click)="succes.set('')">×</button>
+        </div>
+      }
 
-      <section class="kpi-grid" aria-label="Indicateurs logistiques">
-        <article class="kpi-card">
-          <span class="kpi-card__icon kpi-card__icon--green">↗</span>
-          <span class="kpi-card__label">Collectes actives</span>
-          <strong>{{ dashboard().kpis.collectesActives }}</strong>
-          <small>{{ dashboard().parStatut["EN_ROUTE"] || 0 }} en route</small>
-        </article>
-        <article class="kpi-card">
-          <span class="kpi-card__icon kpi-card__icon--orange">✓</span>
-          <span class="kpi-card__label">Livraisons terminées</span>
-          <strong>{{ dashboard().kpis.livraisonsTerminees }}</strong>
-          <small>{{ dashboard().kpis.poidsLivreKg }} kg redistribués</small>
-        </article>
-        <article class="kpi-card">
-          <span class="kpi-card__icon kpi-card__icon--blue">◷</span>
-          <span class="kpi-card__label">Durée moyenne</span>
-          <strong>{{ dashboard().kpis.dureeMoyenneMinutes }} min</strong>
-          <small>De collecte à livraison</small>
-        </article>
-        <article class="kpi-card">
-          <span class="kpi-card__icon kpi-card__icon--purple">◎</span>
-          <span class="kpi-card__label">Taux de ponctualité</span>
-          <strong>{{ dashboard().kpis.tauxPonctualite }}%</strong>
-          <small>Objectif mensuel : 95%</small>
-        </article>
-      </section>
-
-      <section class="dashboard-grid">
-        <article class="panel map-panel" id="carte">
-          <div class="panel__header">
+      @switch (section()) {
+        @case ("overview") {
+          <section class="hero-summary">
             <div>
-              <span class="panel__eyebrow">Suivi opérationnel</span>
-              <h2>Carte des collectes</h2>
+              <span class="eyebrow">Session {{ utilisateur()?.role }}</span>
+              <h2>Bonjour, {{ utilisateur()?.prenom }}.</h2>
+              <p>
+                Votre environnement est prêt. Utilisez la navigation pour
+                tester chaque étape autorisée du parcours.
+              </p>
             </div>
-            <div class="map-legend">
-              <span><i class="dot dot--green"></i> Départ</span>
-              <span><i class="dot dot--orange"></i> Arrivée</span>
-              <span><i class="dot dot--dark"></i> En route</span>
-            </div>
-          </div>
-          <div #mapContainer class="map"></div>
-        </article>
+            <div class="hero-summary__mark">RF</div>
+          </section>
 
-        <article class="panel alerts-panel">
-          <div class="panel__header">
-            <div>
-              <span class="panel__eyebrow">À traiter</span>
-              <h2>Alertes</h2>
-            </div>
-            <span class="panel__count">{{ dashboard().alertes.length }}</span>
-          </div>
-          <div class="alert-list">
-            @for (alerte of dashboard().alertes; track alerte.id) {
-              <button
-                class="alert-item"
-                type="button"
-                (click)="ouvrirCollecte(collectes().find(c => c._id === alerte.id)!)"
-              >
-                <span
-                  class="alert-item__signal"
-                  [class.alert-item__signal--critical]="alerte.niveau === 'CRITIQUE'"
-                >!</span>
-                <span>
-                  <strong>{{ alerte.titre }}</strong>
-                  <small>{{ alerte.message }}</small>
-                </span>
-                <span>›</span>
-              </button>
-            } @empty {
-              <div class="empty-state">
-                <span>✓</span>
-                <strong>Tout est sous contrôle</strong>
-                <p>Aucune alerte logistique active.</p>
+          <section class="metric-grid">
+            <article class="metric-card">
+              <span class="metric-card__icon metric-card__icon--green">▤</span>
+              <small>Annonces actives</small>
+              <strong>{{ annonces().length }}</strong>
+              <p>Offres et demandes publiques</p>
+            </article>
+            <article class="metric-card">
+              <span class="metric-card__icon metric-card__icon--orange">◇</span>
+              <small>Matchings</small>
+              <strong>{{ matchings().length }}</strong>
+              <p>{{ suggestions().length }} suggestion(s) disponible(s)</p>
+            </article>
+            <article class="metric-card">
+              <span class="metric-card__icon metric-card__icon--blue">◫</span>
+              <small>Conversations</small>
+              <strong>{{ conversations().length }}</strong>
+              <p>Canaux de coordination actifs</p>
+            </article>
+            <article class="metric-card">
+              <span class="metric-card__icon metric-card__icon--purple">↗</span>
+              <small>Collectes visibles</small>
+              <strong>{{ collectes().length }}</strong>
+              <p>{{ dashboardLogistique().kpis.collectesActives }} en cours</p>
+            </article>
+          </section>
+
+          <section class="overview-grid">
+            <article class="panel journey-panel">
+              <div class="panel__header">
+                <div>
+                  <span class="eyebrow">Parcours métier</span>
+                  <h2>Du besoin à la livraison</h2>
+                </div>
               </div>
-            }
-          </div>
-        </article>
-      </section>
+              <div class="journey">
+                <button type="button" (click)="naviguer('annonces')">
+                  <i>01</i>
+                  <span><strong>Publier</strong><small>Offre ou demande</small></span>
+                </button>
+                <b>→</b>
+                <button type="button" (click)="naviguer('matching')">
+                  <i>02</i>
+                  <span><strong>Matcher</strong><small>Score automatique</small></span>
+                </button>
+                <b>→</b>
+                <button type="button" (click)="naviguer('messages')">
+                  <i>03</i>
+                  <span><strong>Échanger</strong><small>Coordination directe</small></span>
+                </button>
+                <b>→</b>
+                <button type="button" (click)="naviguer('logistique')">
+                  <i>04</i>
+                  <span><strong>Livrer</strong><small>Suivi et impact</small></span>
+                </button>
+              </div>
+            </article>
 
-      <section class="panel collections-panel" id="collectes">
-        <div class="panel__header panel__header--wrap">
-          <div>
-            <span class="panel__eyebrow">Flux des dons</span>
-            <h2>Collectes récentes</h2>
-          </div>
-          <div class="collection-tools">
-            <label class="search">
+            <article class="panel role-guide">
+              <div class="panel__header">
+                <div>
+                  <span class="eyebrow">Guide de test</span>
+                  <h2>Actions pour votre rôle</h2>
+                </div>
+              </div>
+              <div class="role-guide__body">
+                @if (utilisateur()?.role === "ADMIN") {
+                  <p>Validez des comptes, assignez un transporteur et exportez le rapport logistique.</p>
+                } @else if (utilisateur()?.role === "FOURNISSEUR") {
+                  <p>Publiez une offre, acceptez une suggestion puis écrivez à l’ONG.</p>
+                } @else if (utilisateur()?.role === "ONG") {
+                  <p>Publiez une demande, consultez les offres compatibles et suivez la livraison.</p>
+                } @else if (utilisateur()?.role === "TRANSPORTEUR") {
+                  <p>Ouvrez une collecte, faites avancer son statut et envoyez une position GPS.</p>
+                } @else {
+                  <p>Consultez les annonces publiques et vérifiez les informations disponibles.</p>
+                }
+                <button class="button button--secondary" type="button" (click)="naviguer('diagnostic')">
+                  Voir le diagnostic
+                </button>
+              </div>
+            </article>
+          </section>
+
+          <section class="panel recent-panel">
+            <div class="panel__header">
+              <div>
+                <span class="eyebrow">Activité publique</span>
+                <h2>Dernières annonces</h2>
+              </div>
+              <button class="text-button" type="button" (click)="naviguer('annonces')">
+                Voir tout →
+              </button>
+            </div>
+            <div class="compact-list">
+              @for (annonce of annonces().slice(0, 4); track annonce._id) {
+                <div class="compact-list__row">
+                  <span class="type-mark" [attr.data-type]="annonce.type">{{
+                    annonce.type === "OFFRE" ? "O" : "D"
+                  }}</span>
+                  <span>
+                    <strong>{{ annonce.titre }}</strong>
+                    <small>{{ annonce.auteur.prenom }} {{ annonce.auteur.nom }}</small>
+                  </span>
+                  <span>{{ annonce.quantiteEstimee }} {{ annonce.unite }}</span>
+                  <i class="status-pill" [attr.data-status]="annonce.urgence">{{
+                    annonce.urgence
+                  }}</i>
+                </div>
+              }
+            </div>
+          </section>
+        }
+
+        @case ("annonces") {
+          <section class="toolbar">
+            <div class="segmented">
+              @for (type of ["TOUS", "OFFRE", "DEMANDE"]; track type) {
+                <button
+                  type="button"
+                  [class.segmented__active]="filtreAnnonce() === type"
+                  (click)="filtreAnnonce.set($any(type))"
+                >
+                  {{ type === "TOUS" ? "Toutes" : type === "OFFRE" ? "Offres" : "Demandes" }}
+                </button>
+              }
+            </div>
+            <label class="search-field">
               <span>⌕</span>
               <input
                 type="search"
-                placeholder="Rechercher une collecte"
-                [ngModel]="recherche()"
-                (ngModelChange)="recherche.set($event)"
+                placeholder="Titre, auteur ou catégorie"
+                [ngModel]="rechercheAnnonce()"
+                (ngModelChange)="rechercheAnnonce.set($event)"
               />
             </label>
-            <select
-              aria-label="Filtrer par statut"
-              [ngModel]="filtreStatut()"
-              (ngModelChange)="filtreStatut.set($event)"
-            >
-              @for (statut of ["TOUS", "A_ASSIGNER", "PLANIFIEE", "EN_ROUTE", "COLLECTEE", "LIVREE"]; track statut) {
-                <option [value]="statut">{{ libelleStatut(statut) }}</option>
-              }
-            </select>
-          </div>
-        </div>
+          </section>
 
-        <div class="collection-table">
-          <div class="collection-row collection-row--head">
-            <span>Collecte</span>
-            <span>Trajet</span>
-            <span>Transporteur</span>
-            <span>Planification</span>
-            <span>Statut</span>
-            <span></span>
-          </div>
-          @for (collecte of collectesFiltrees(); track collecte._id) {
-            <button class="collection-row" type="button" (click)="ouvrirCollecte(collecte)">
-              <span class="collection-main">
-                <i [class.collection-main__urgent]="collecte.priorite === 'URGENTE'"></i>
-                <span>
-                  <strong>{{ collecte.donation.titre }}</strong>
-                  <small>{{ collecte.reference }}</small>
-                </span>
-              </span>
-              <span class="route-cell">
-                <strong>{{ collecte.distanceKm }} km</strong>
-                <small>{{ collecte.adresseDepart }} → {{ collecte.adresseArrivee }}</small>
-              </span>
-              <span>
-                @if (collecte.transporteur) {
-                  <strong>{{ collecte.transporteur.prenom }} {{ collecte.transporteur.nom }}</strong>
-                  <small>{{ collecte.vehicule || "Véhicule non renseigné" }}</small>
-                } @else {
-                  <span class="unassigned">Non assigné</span>
+          @if (peutPublier()) {
+            <section class="my-announcements">
+              <div class="section-title">
+                <div>
+                  <span class="eyebrow">Votre espace</span>
+                  <h2>Mes annonces</h2>
+                </div>
+                <span>{{ mesAnnonces().length }}</span>
+              </div>
+              <div class="mini-card-row">
+                @for (annonce of mesAnnonces(); track annonce._id) {
+                  <article class="mini-announcement">
+                    <i [attr.data-type]="annonce.type">{{ annonce.type }}</i>
+                    <strong>{{ annonce.titre }}</strong>
+                    <small>{{ annonce.quantiteEstimee }} {{ annonce.unite }} · {{ libelleStatut(annonce.statut) }}</small>
+                    @if (annonce.statut === "ACTIVE") {
+                      <button type="button" (click)="annulerAnnonce(annonce)">Annuler</button>
+                    }
+                  </article>
+                } @empty {
+                  <p class="empty-inline">Vous n’avez pas encore d’annonce.</p>
                 }
-              </span>
-              <span>
-                <strong>{{ dateCourte(collecte.dateCollectePrevue) }}</strong>
-                <small>{{ collecte.dureeEstimeeMinutes }} min estimées</small>
-              </span>
-              <span>
-                <i class="status-pill" [attr.data-status]="collecte.statut">
-                  {{ libelleStatut(collecte.statut) }}
-                </i>
-              </span>
-              <span class="row-arrow">›</span>
-            </button>
-          } @empty {
-            <div class="table-empty">Aucune collecte ne correspond à ces filtres.</div>
+              </div>
+            </section>
           }
-        </div>
-      </section>
 
-      <section class="analytics-grid" id="analytics">
-        <article class="panel activity-panel">
-          <div class="panel__header">
-            <div>
-              <span class="panel__eyebrow">7 derniers jours</span>
-              <h2>Livraisons finalisées</h2>
-            </div>
-          </div>
-          <div class="bar-chart">
-            @for (point of dashboard().activite; track point.date) {
-              <div class="bar-chart__item">
-                <span>{{ point.livraisons }}</span>
-                <i [style.height.%]="(point.livraisons / maximumActivite()) * 100"></i>
-                <small>{{ jourCourt(point.date) }}</small>
+          <section class="announcement-grid">
+            @for (annonce of annoncesFiltrees(); track annonce._id) {
+              <article class="announcement-card">
+                <div class="announcement-card__top">
+                  <span class="type-badge" [attr.data-type]="annonce.type">
+                    {{ annonce.type === "OFFRE" ? "Surplus disponible" : "Besoin recherché" }}
+                  </span>
+                  <i class="urgency-dot" [attr.data-urgency]="annonce.urgence"></i>
+                </div>
+                <div class="announcement-card__category">
+                  {{ annonce.categorieDonation.nom }}
+                </div>
+                <h2>{{ annonce.titre }}</h2>
+                <p>{{ annonce.description }}</p>
+                <div class="announcement-card__quantity">
+                  <strong>{{ annonce.quantiteEstimee }}</strong>
+                  <span>{{ annonce.unite }}</span>
+                </div>
+                <div class="announcement-card__meta">
+                  <span>⌖ {{ annonce.adresse }}</span>
+                  <span>◷ {{ dateCourte(annonce.dateExpiration) }}</span>
+                </div>
+                <footer>
+                  <span class="person-chip">
+                    <i>{{ initiales(annonce.auteur) }}</i>
+                    {{ annonce.auteur.prenom }} {{ annonce.auteur.nom }}
+                  </span>
+                  <span>{{ annonce.auteur.role }}</span>
+                </footer>
+              </article>
+            } @empty {
+              <div class="empty-page">
+                <span>⌕</span>
+                <h2>Aucune annonce trouvée</h2>
+                <p>Modifiez les filtres ou publiez une nouvelle annonce.</p>
               </div>
             }
-          </div>
-        </article>
+          </section>
+        }
 
-        <article class="panel status-panel">
-          <div class="panel__header">
+        @case ("matching") {
+          <section class="matching-summary">
             <div>
-              <span class="panel__eyebrow">Répartition</span>
-              <h2>État des collectes</h2>
+              <span class="eyebrow">Algorithme de compatibilité</span>
+              <h2>{{ suggestions().length }} suggestion(s) pour vos annonces</h2>
+              <p>Catégorie 40% · Distance 30% · Quantité 20% · Urgence 10%</p>
             </div>
+            <div class="matching-summary__score">
+              <strong>{{ suggestions().length ? pourcentage(suggestions()[0].score) : "—" }}</strong>
+              <small>meilleur score</small>
+            </div>
+          </section>
+
+          <div class="matching-layout">
+            <section>
+              <div class="section-title">
+                <div>
+                  <span class="eyebrow">À examiner</span>
+                  <h2>Suggestions automatiques</h2>
+                </div>
+              </div>
+              <div class="suggestion-list">
+                @for (suggestion of suggestions(); track suggestion.monAnnonce.id + suggestion.annonceCompatible.id) {
+                  <article class="suggestion-card">
+                    <div class="suggestion-card__score">
+                      <strong>{{ pourcentage(suggestion.score) }}</strong>
+                      <small>compatible</small>
+                    </div>
+                    <div class="suggestion-card__pair">
+                      <span>
+                        <small>Votre {{ suggestion.monAnnonce.type === "OFFRE" ? "offre" : "demande" }}</small>
+                        <strong>{{ suggestion.monAnnonce.titre }}</strong>
+                      </span>
+                      <i>↔</i>
+                      <span>
+                        <small>{{ suggestion.annonceCompatible.auteur.role }}</small>
+                        <strong>{{ suggestion.annonceCompatible.titre }}</strong>
+                      </span>
+                    </div>
+                    <div class="criteria">
+                      <span>Catégorie <b>{{ pourcentage(suggestion.criteres["categorie"]) }}</b></span>
+                      <span>Distance <b>{{ suggestion.distanceKm }} km</b></span>
+                      <span>Quantité <b>{{ pourcentage(suggestion.criteres["quantite"]) }}</b></span>
+                      <span>Urgence <b>{{ pourcentage(suggestion.criteres["urgence"]) }}</b></span>
+                    </div>
+                    <button class="button button--primary" type="button" (click)="accepterSuggestion(suggestion)">
+                      Accepter le matching
+                    </button>
+                  </article>
+                } @empty {
+                  <div class="empty-page empty-page--small">
+                    <span>◇</span>
+                    <h2>Aucune suggestion active</h2>
+                    <p>Publiez une annonce ou restaurez les données de démonstration.</p>
+                  </div>
+                }
+              </div>
+            </section>
+
+            <aside class="panel matching-history">
+              <div class="panel__header">
+                <div>
+                  <span class="eyebrow">Historique</span>
+                  <h2>Mes matchings</h2>
+                </div>
+              </div>
+              @for (matching of matchings(); track matching._id) {
+                <div class="matching-history__item">
+                  <div>
+                    <strong>{{ matching.offre.titre }}</strong>
+                    <span>↔</span>
+                    <strong>{{ matching.demande.titre }}</strong>
+                  </div>
+                  <p>{{ pourcentage(matching.score) }} · {{ matching.distanceKm }} km</p>
+                  <footer>
+                    <i class="status-pill" [attr.data-status]="matching.statut">{{
+                      libelleStatut(matching.statut)
+                    }}</i>
+                    @if (matching.statut === "ACCEPTE") {
+                      <button type="button" (click)="refuserMatching(matching)">Refuser</button>
+                    }
+                  </footer>
+                </div>
+              } @empty {
+                <p class="empty-inline">Aucun matching enregistré.</p>
+              }
+            </aside>
           </div>
-          @for (statut of ["A_ASSIGNER", "PLANIFIEE", "EN_ROUTE", "COLLECTEE", "LIVREE"]; track statut) {
-            <div class="status-line">
-              <span><i [attr.data-status]="statut"></i>{{ libelleStatut(statut) }}</span>
-              <strong>{{ dashboard().parStatut[statut] || 0 }}</strong>
+        }
+
+        @case ("messages") {
+          <section class="messaging-shell">
+            <aside class="conversation-list">
+              <div class="conversation-list__header">
+                <span class="eyebrow">Boîte de réception</span>
+                <h2>{{ conversations().length }} conversation(s)</h2>
+              </div>
+              @for (conversation of conversations(); track conversation._id) {
+                <button
+                  class="conversation-item"
+                  [class.conversation-item--active]="conversationSelectionnee()?._id === conversation._id"
+                  type="button"
+                  (click)="ouvrirConversation(conversation)"
+                >
+                  <span class="profile-avatar">{{ initiales(autreParticipant(conversation)) }}</span>
+                  <span>
+                    <strong>
+                      {{ autreParticipant(conversation)?.prenom }}
+                      {{ autreParticipant(conversation)?.nom }}
+                    </strong>
+                    <small>{{ conversation.annonce.titre }}</small>
+                  </span>
+                  <i>{{ dateCourte(conversation.dernierMessageAt) }}</i>
+                </button>
+              } @empty {
+                <div class="empty-page empty-page--small">
+                  <span>◫</span>
+                  <h2>Aucune conversation</h2>
+                  <p>Un matching accepté crée automatiquement un échange.</p>
+                </div>
+              }
+            </aside>
+
+            <section class="chat-panel">
+              @if (conversationSelectionnee(); as conversation) {
+                <header class="chat-panel__header">
+                  <span class="profile-avatar">{{ initiales(autreParticipant(conversation)) }}</span>
+                  <span>
+                    <strong>
+                      {{ autreParticipant(conversation)?.prenom }}
+                      {{ autreParticipant(conversation)?.nom }}
+                    </strong>
+                    <small>{{ conversation.annonce.titre }} · {{ conversation.annonce.type }}</small>
+                  </span>
+                </header>
+                <div class="message-stream">
+                  @for (message of messages(); track message._id) {
+                    <div
+                      class="message"
+                      [class.message--mine]="(message.expediteur._id || message.expediteur.id) === (utilisateur()?._id || utilisateur()?.id)"
+                    >
+                      <span>{{ message.contenu }}</span>
+                      <small>{{ message.expediteur.prenom }} · {{ dateCourte(message.createdAt) }}</small>
+                    </div>
+                  } @empty {
+                    <div class="chat-empty">Commencez la conversation.</div>
+                  }
+                </div>
+                <form class="composer" (ngSubmit)="envoyerMessage()">
+                  <input
+                    name="message"
+                    placeholder="Écrire un message…"
+                    [ngModel]="nouveauMessage()"
+                    (ngModelChange)="nouveauMessage.set($event)"
+                  />
+                  <button class="button button--primary" type="submit" [disabled]="!nouveauMessage().trim()">
+                    Envoyer
+                  </button>
+                </form>
+              } @else {
+                <div class="empty-page">
+                  <span>◫</span>
+                  <h2>Sélectionnez une conversation</h2>
+                  <p>Les messages apparaîtront ici.</p>
+                </div>
+              }
+            </section>
+          </section>
+        }
+
+        @case ("logistique") {
+          <section class="metric-grid">
+            <article class="metric-card">
+              <span class="metric-card__icon metric-card__icon--green">↗</span>
+              <small>Collectes actives</small>
+              <strong>{{ dashboardLogistique().kpis.collectesActives }}</strong>
+              <p>{{ dashboardLogistique().parStatut["EN_ROUTE"] || 0 }} en route</p>
+            </article>
+            <article class="metric-card">
+              <span class="metric-card__icon metric-card__icon--orange">✓</span>
+              <small>Livraisons terminées</small>
+              <strong>{{ dashboardLogistique().kpis.livraisonsTerminees }}</strong>
+              <p>{{ dashboardLogistique().kpis.poidsLivreKg }} kg redistribués</p>
+            </article>
+            <article class="metric-card">
+              <span class="metric-card__icon metric-card__icon--blue">◷</span>
+              <small>Durée moyenne</small>
+              <strong>{{ dashboardLogistique().kpis.dureeMoyenneMinutes }} min</strong>
+              <p>Collecte à livraison</p>
+            </article>
+            <article class="metric-card">
+              <span class="metric-card__icon metric-card__icon--purple">◎</span>
+              <small>Ponctualité</small>
+              <strong>{{ dashboardLogistique().kpis.tauxPonctualite }}%</strong>
+              <p>Objectif : 95%</p>
+            </article>
+          </section>
+
+          <section class="logistics-grid">
+            <article class="panel map-panel">
+              <div class="panel__header">
+                <div>
+                  <span class="eyebrow">Suivi opérationnel</span>
+                  <h2>Carte des collectes</h2>
+                </div>
+                <div class="map-legend">
+                  <span><i class="dot dot--green"></i> Départ</span>
+                  <span><i class="dot dot--orange"></i> Arrivée</span>
+                  <span><i class="dot dot--dark"></i> En route</span>
+                </div>
+              </div>
+              <div #mapContainer class="map"></div>
+            </article>
+
+            <article class="panel alert-panel">
+              <div class="panel__header">
+                <div>
+                  <span class="eyebrow">À traiter</span>
+                  <h2>Alertes</h2>
+                </div>
+                <span class="count-badge">{{ dashboardLogistique().alertes.length }}</span>
+              </div>
+              @for (alerte of dashboardLogistique().alertes; track alerte.id) {
+                <div class="logistic-alert">
+                  <span>!</span>
+                  <div>
+                    <strong>{{ alerte.titre }}</strong>
+                    <small>{{ alerte.message }}</small>
+                  </div>
+                </div>
+              } @empty {
+                <div class="empty-page empty-page--small">
+                  <span>✓</span>
+                  <h2>Aucune alerte</h2>
+                </div>
+              }
+            </article>
+          </section>
+
+          <section class="panel collection-panel">
+            <div class="panel__header panel__header--wrap">
+              <div>
+                <span class="eyebrow">Flux des dons</span>
+                <h2>Collectes</h2>
+              </div>
+              <div class="toolbar toolbar--compact">
+                <label class="search-field">
+                  <span>⌕</span>
+                  <input
+                    type="search"
+                    placeholder="Référence ou trajet"
+                    [ngModel]="rechercheCollecte()"
+                    (ngModelChange)="rechercheCollecte.set($event)"
+                  />
+                </label>
+                <select
+                  [ngModel]="filtreStatut()"
+                  (ngModelChange)="filtreStatut.set($event)"
+                >
+                  @for (statut of ["TOUS", "A_ASSIGNER", "PLANIFIEE", "EN_ROUTE", "COLLECTEE", "LIVREE"]; track statut) {
+                    <option [value]="statut">{{ libelleStatut(statut) }}</option>
+                  }
+                </select>
+              </div>
             </div>
-          }
-        </article>
-      </section>
+            <div class="data-table">
+              <div class="data-row data-row--head logistics-row">
+                <span>Collecte</span><span>Trajet</span><span>Transporteur</span
+                ><span>Planification</span><span>Statut</span>
+              </div>
+              @for (collecte of collectesFiltrees(); track collecte._id) {
+                <button class="data-row logistics-row" type="button" (click)="ouvrirCollecte(collecte)">
+                  <span>
+                    <strong>{{ collecte.donation.titre }}</strong>
+                    <small>{{ collecte.reference }}</small>
+                  </span>
+                  <span>
+                    <strong>{{ collecte.distanceKm }} km</strong>
+                    <small>{{ collecte.adresseDepart }} → {{ collecte.adresseArrivee }}</small>
+                  </span>
+                  <span>
+                    @if (collecte.transporteur) {
+                      <strong>{{ collecte.transporteur.prenom }} {{ collecte.transporteur.nom }}</strong>
+                      <small>{{ collecte.vehicule || "Véhicule non renseigné" }}</small>
+                    } @else {
+                      <i class="status-pill" data-status="A_ASSIGNER">Non assigné</i>
+                    }
+                  </span>
+                  <span>
+                    <strong>{{ dateCourte(collecte.dateCollectePrevue) }}</strong>
+                    <small>{{ collecte.dureeEstimeeMinutes }} min estimées</small>
+                  </span>
+                  <span><i class="status-pill" [attr.data-status]="collecte.statut">{{ libelleStatut(collecte.statut) }}</i></span>
+                </button>
+              }
+            </div>
+          </section>
+
+          <section class="analytics-grid">
+            <article class="panel">
+              <div class="panel__header">
+                <div><span class="eyebrow">7 jours</span><h2>Livraisons finalisées</h2></div>
+              </div>
+              <div class="bar-chart">
+                @for (point of dashboardLogistique().activite; track point.date) {
+                  <div>
+                    <span>{{ point.livraisons }}</span>
+                    <i [style.height.%]="(point.livraisons / maximumActivite()) * 100"></i>
+                    <small>{{ jourCourt(point.date) }}</small>
+                  </div>
+                }
+              </div>
+            </article>
+            <article class="panel status-breakdown">
+              <div class="panel__header">
+                <div><span class="eyebrow">Répartition</span><h2>Par statut</h2></div>
+              </div>
+              @for (statut of ["A_ASSIGNER", "PLANIFIEE", "EN_ROUTE", "COLLECTEE", "LIVREE"]; track statut) {
+                <div>
+                  <span><i [attr.data-status]="statut"></i>{{ libelleStatut(statut) }}</span>
+                  <strong>{{ dashboardLogistique().parStatut[statut] || 0 }}</strong>
+                </div>
+              }
+            </article>
+          </section>
+        }
+
+        @case ("admin") {
+          <section class="metric-grid admin-metrics">
+            <article class="metric-card">
+              <small>Utilisateurs</small>
+              <strong>{{ dashboardAdmin()?.utilisateurs?.total || 0 }}</strong>
+              <p>{{ totalParRole("FOURNISSEUR") }} fournisseurs</p>
+            </article>
+            <article class="metric-card">
+              <small>Donations</small>
+              <strong>{{ dashboardAdmin()?.donations || 0 }}</strong>
+              <p>Lots enregistrés</p>
+            </article>
+            <article class="metric-card">
+              <small>Annonces</small>
+              <strong>{{ dashboardAdmin()?.annonces || 0 }}</strong>
+              <p>Offres et demandes</p>
+            </article>
+            <article class="metric-card">
+              <small>Collectes</small>
+              <strong>{{ dashboardAdmin()?.collectes || 0 }}</strong>
+              <p>Flux logistiques</p>
+            </article>
+          </section>
+
+          <section class="panel">
+            <div class="panel__header">
+              <div>
+                <span class="eyebrow">Gestion des accès</span>
+                <h2>Utilisateurs</h2>
+              </div>
+              <span class="count-badge">{{ utilisateurs().length }}</span>
+            </div>
+            <div class="data-table">
+              <div class="data-row data-row--head users-row">
+                <span>Utilisateur</span><span>Contact</span><span>Rôle</span
+                ><span>Statut</span><span></span>
+              </div>
+              @for (user of utilisateurs(); track user._id) {
+                <div class="data-row users-row">
+                  <span class="user-cell">
+                    <i class="profile-avatar">{{ initiales(user) }}</i>
+                    <span><strong>{{ user.prenom }} {{ user.nom }}</strong><small>{{ dateCourte(user.createdAt) }}</small></span>
+                  </span>
+                  <span><strong>{{ user.email }}</strong><small>{{ user.telephone }}</small></span>
+                  <span><i class="role-pill">{{ user.role }}</i></span>
+                  <span><i class="status-pill" [attr.data-status]="user.statutCompte">{{ user.statutCompte }}</i></span>
+                  <span><button class="text-button" type="button" (click)="editerAcces(user)">Modifier</button></span>
+                </div>
+              }
+            </div>
+          </section>
+        }
+
+        @case ("profile") {
+          <section class="profile-layout">
+            <article class="profile-summary-card">
+              <span class="profile-avatar profile-avatar--large">{{ initiales() }}</span>
+              <h2>{{ utilisateur()?.prenom }} {{ utilisateur()?.nom }}</h2>
+              <p>{{ utilisateur()?.email }}</p>
+              <i class="role-pill">{{ utilisateur()?.role }}</i>
+              <div>
+                <span>Statut du compte</span>
+                <strong>{{ utilisateur()?.statutCompte }}</strong>
+              </div>
+            </article>
+            <form class="panel profile-form" (ngSubmit)="enregistrerProfil()">
+              <div class="panel__header">
+                <div><span class="eyebrow">Coordonnées</span><h2>Modifier mon profil</h2></div>
+              </div>
+              <div class="form-grid">
+                <label>
+                  Prénom
+                  <input [value]="utilisateur()?.prenom" disabled />
+                </label>
+                <label>
+                  Nom
+                  <input [value]="utilisateur()?.nom" disabled />
+                </label>
+                <label>
+                  Téléphone
+                  <input
+                    name="telephone"
+                    [ngModel]="profilTelephone()"
+                    (ngModelChange)="profilTelephone.set($event)"
+                  />
+                </label>
+                <label class="form-grid__wide">
+                  Adresse
+                  <input
+                    name="adresse"
+                    [ngModel]="profilAdresse()"
+                    (ngModelChange)="profilAdresse.set($event)"
+                  />
+                </label>
+              </div>
+              <footer><button class="button button--primary" type="submit">Enregistrer</button></footer>
+            </form>
+          </section>
+        }
+
+        @case ("diagnostic") {
+          <section class="diagnostic-intro">
+            <div>
+              <span class="eyebrow">Contrôle de couverture</span>
+              <h2>Fonctionnalités exposées au frontend</h2>
+              <p>
+                Cette vue distingue les modules réellement testables via API
+                des modèles qui existent uniquement dans MongoDB.
+              </p>
+            </div>
+            <button class="button button--primary" type="button" (click)="chargerTout()">Relancer les contrôles</button>
+          </section>
+          <section class="diagnostic-grid">
+            @for (module of couverture(); track module.nom) {
+              <article [class.diagnostic-card--off]="!module.disponible" class="diagnostic-card">
+                <span>{{ module.disponible ? "✓" : "—" }}</span>
+                <div>
+                  <strong>{{ module.nom }}</strong>
+                  <p>{{ module.detail }}</p>
+                </div>
+                <i>{{ module.disponible ? "Testable" : "Non exposé" }}</i>
+              </article>
+            }
+          </section>
+          <section class="panel api-reference">
+            <div class="panel__header">
+              <div><span class="eyebrow">Endpoints actifs</span><h2>Résumé des appels utilisés</h2></div>
+            </div>
+            <div class="endpoint-list">
+              <code>POST /api/auth/login</code>
+              <code>GET · POST · PUT · DELETE /api/categories</code>
+              <code>GET · POST · PUT · PATCH · DELETE /api/donations</code>
+              <code>GET · POST · DELETE /api/annonces</code>
+              <code>GET /api/annonces/suggestion-categorie</code>
+              <code>GET · POST · PATCH /api/matchings</code>
+              <code>GET · POST /api/conversations</code>
+              <code>GET · PATCH /api/logistique</code>
+              <code>GET · PATCH /api/admin</code>
+            </div>
+          </section>
+        }
+      }
     </main>
   </div>
 
-  @if (collecteSelectionnee(); as collecte) {
-    <div class="drawer-backdrop" (click)="fermerCollecte()"></div>
-    <aside class="drawer">
-      <button class="drawer__close" type="button" (click)="fermerCollecte()">×</button>
-      <span class="panel__eyebrow">{{ collecte.reference }}</span>
-      <h2>{{ collecte.donation.titre }}</h2>
-      <span class="status-pill" [attr.data-status]="collecte.statut">
-        {{ libelleStatut(collecte.statut) }}
-      </span>
-
-      <div class="drawer__route">
-        <div>
-          <i></i>
-          <span><small>Départ</small><strong>{{ collecte.adresseDepart }}</strong></span>
-        </div>
-        <div>
-          <i></i>
-          <span><small>Arrivée</small><strong>{{ collecte.adresseArrivee }}</strong></span>
-        </div>
+  @if (formulaireAnnonceOuvert()) {
+    <div class="modal-backdrop" (click)="formulaireAnnonceOuvert.set(false)"></div>
+    <form class="modal modal--wide" (ngSubmit)="creerAnnonce()">
+      <button class="modal__close" type="button" (click)="formulaireAnnonceOuvert.set(false)">×</button>
+      <span class="eyebrow">Nouvelle {{ utilisateur()?.role === "FOURNISSEUR" ? "offre" : "demande" }}</span>
+      <h2>Publier une annonce</h2>
+      <div class="form-grid">
+        <label class="form-grid__wide">
+          Titre
+          <input name="titre" [(ngModel)]="annonceForm.titre" required maxlength="180" />
+        </label>
+        <label class="form-grid__wide">
+          Description
+          <textarea name="description" [(ngModel)]="annonceForm.description" required></textarea>
+        </label>
+        <label>
+          Catégorie
+          <select name="categorie" [(ngModel)]="annonceForm.categorieDonation" required>
+            @for (categorie of categories(); track categorie._id) {
+              <option [value]="categorie._id">{{ categorie.nom }}</option>
+            }
+          </select>
+        </label>
+        <label>
+          Urgence
+          <select name="urgence" [(ngModel)]="annonceForm.urgence">
+            <option value="FAIBLE">Faible</option>
+            <option value="MOYENNE">Moyenne</option>
+            <option value="ELEVEE">Élevée</option>
+          </select>
+        </label>
+        <label>
+          Quantité
+          <input name="quantite" type="number" min="0.01" [(ngModel)]="annonceForm.quantiteEstimee" required />
+        </label>
+        <label>
+          Unité
+          <select name="unite" [(ngModel)]="annonceForm.unite">
+            @for (unite of ["KG", "G", "L", "UNITE", "PORTION"]; track unite) {
+              <option [value]="unite">{{ unite }}</option>
+            }
+          </select>
+        </label>
+        <label class="form-grid__wide">
+          Adresse
+          <input name="adresse" [(ngModel)]="annonceForm.adresse" required />
+        </label>
+        <label>
+          Latitude
+          <input name="latitude" type="number" step="0.0001" [(ngModel)]="annonceForm.latitude" required />
+        </label>
+        <label>
+          Longitude
+          <input name="longitude" type="number" step="0.0001" [(ngModel)]="annonceForm.longitude" required />
+        </label>
+        <label class="form-grid__wide">
+          Date d’expiration
+          <input name="expiration" type="datetime-local" [(ngModel)]="annonceForm.dateExpiration" required />
+        </label>
       </div>
+      <footer class="modal__footer">
+        <button class="button" type="button" (click)="formulaireAnnonceOuvert.set(false)">Annuler</button>
+        <button class="button button--primary" type="submit">Publier</button>
+      </footer>
+    </form>
+  }
 
-      <div class="drawer__stats">
+  @if (collecteSelectionnee(); as collecte) {
+    <div class="modal-backdrop" (click)="fermerCollecte()"></div>
+    <aside class="drawer">
+      <button class="modal__close" type="button" (click)="fermerCollecte()">×</button>
+      <span class="eyebrow">{{ collecte.reference }}</span>
+      <h2>{{ collecte.donation.titre }}</h2>
+      <i class="status-pill" [attr.data-status]="collecte.statut">{{ libelleStatut(collecte.statut) }}</i>
+      <div class="route-detail">
+        <div><i></i><span><small>Départ</small><strong>{{ collecte.adresseDepart }}</strong></span></div>
+        <div><i></i><span><small>Arrivée</small><strong>{{ collecte.adresseArrivee }}</strong></span></div>
+      </div>
+      <div class="drawer-stats">
         <span><small>Distance</small><strong>{{ collecte.distanceKm }} km</strong></span>
-        <span><small>Durée prévue</small><strong>{{ collecte.dureeEstimeeMinutes }} min</strong></span>
-        <span><small>Poids</small><strong>{{ collecte.donation.poidsTotalKg || 0 }} kg</strong></span>
+        <span><small>Durée</small><strong>{{ collecte.dureeEstimeeMinutes }} min</strong></span>
+        <span><small>Poids</small><strong>{{ collecte.donation.poidsTotalKg }} kg</strong></span>
       </div>
 
       @if (utilisateur()?.role === "ADMIN" && ["A_ASSIGNER", "PLANIFIEE"].includes(collecte.statut)) {
-        <div class="drawer__section">
+        <section class="drawer-section">
           <h3>Assignation</h3>
           <label>
             Transporteur
-            <select
-              [ngModel]="transporteurSelectionne()"
-              (ngModelChange)="transporteurSelectionne.set($event)"
-            >
-              <option value="">Choisir un transporteur</option>
+            <select [ngModel]="transporteurSelectionne()" (ngModelChange)="transporteurSelectionne.set($event)">
+              <option value="">Choisir</option>
               @for (transporteur of transporteurs(); track transporteur._id) {
                 <option [value]="transporteur._id">
                   {{ transporteur.prenom }} {{ transporteur.nom }} · {{ transporteur.collectesActives }} active(s)
@@ -375,28 +995,18 @@
           </label>
           <label>
             Véhicule
-            <input
-              type="text"
-              placeholder="Ex. Fourgon frigorifique 12"
-              [ngModel]="vehicule()"
-              (ngModelChange)="vehicule.set($event)"
-            />
+            <input [ngModel]="vehicule()" (ngModelChange)="vehicule.set($event)" placeholder="Fourgon 12" />
           </label>
-          <button
-            class="button button--primary button--wide"
-            type="button"
-            [disabled]="!transporteurSelectionne()"
-            (click)="assigner()"
-          >
+          <button class="button button--primary button--wide" type="button" [disabled]="!transporteurSelectionne()" (click)="assigner()">
             Confirmer l’assignation
           </button>
-        </div>
+        </section>
       }
 
       @if (["ADMIN", "TRANSPORTEUR"].includes(utilisateur()?.role || "") && statutsActionnables(collecte).length) {
-        <div class="drawer__section">
+        <section class="drawer-section">
           <h3>Faire avancer la collecte</h3>
-          <div class="drawer__actions">
+          <div class="action-row">
             @for (statut of statutsActionnables(collecte); track statut) {
               <button
                 class="button"
@@ -409,12 +1019,47 @@
               </button>
             }
           </div>
-        </div>
+          @if (["EN_ROUTE", "COLLECTEE"].includes(collecte.statut)) {
+            <button class="button button--secondary button--wide" type="button" (click)="envoyerPosition(collecte)">
+              Envoyer une position GPS de test
+            </button>
+          }
+        </section>
       }
     </aside>
   }
 
+  @if (editionUtilisateur(); as user) {
+    <div class="modal-backdrop" (click)="editionUtilisateur.set(null)"></div>
+    <form class="modal" (ngSubmit)="enregistrerAcces()">
+      <button class="modal__close" type="button" (click)="editionUtilisateur.set(null)">×</button>
+      <span class="eyebrow">Gestion des accès</span>
+      <h2>{{ user.prenom }} {{ user.nom }}</h2>
+      <p class="modal__subtitle">{{ user.email }}</p>
+      <label>
+        Rôle
+        <select [ngModel]="roleUtilisateur()" (ngModelChange)="roleUtilisateur.set($event)" name="role">
+          @for (role of ["ADMIN", "FOURNISSEUR", "ONG", "TRANSPORTEUR", "CITOYEN"]; track role) {
+            <option [value]="role">{{ role }}</option>
+          }
+        </select>
+      </label>
+      <label>
+        Statut
+        <select [ngModel]="statutUtilisateur()" (ngModelChange)="statutUtilisateur.set($event)" name="statut">
+          @for (statut of ["EN_ATTENTE", "VALIDE", "REFUSE", "SUSPENDU"]; track statut) {
+            <option [value]="statut">{{ statut }}</option>
+          }
+        </select>
+      </label>
+      <footer class="modal__footer">
+        <button class="button" type="button" (click)="editionUtilisateur.set(null)">Annuler</button>
+        <button class="button button--primary" type="submit">Enregistrer</button>
+      </footer>
+    </form>
+  }
+
   @if (chargement()) {
-    <div class="loading-overlay"><span></span><p>Mise à jour du réseau…</p></div>
+    <div class="loading-bar"><i></i></div>
   }
 }

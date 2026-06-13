@@ -12,14 +12,98 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import * as L from 'leaflet';
-import { forkJoin, of } from 'rxjs';
+
+type Section =
+  | 'overview'
+  | 'annonces'
+  | 'matching'
+  | 'messages'
+  | 'logistique'
+  | 'admin'
+  | 'profile'
+  | 'diagnostic';
+
+interface Coordonnees {
+  latitude: number;
+  longitude: number;
+}
 
 interface Utilisateur {
-  id: string;
+  id?: string;
+  _id?: string;
   nom: string;
   prenom: string;
   email: string;
+  telephone?: string;
   role: string;
+  adresse?: string;
+  localisation?: Coordonnees;
+  statutCompte?: string;
+  createdAt?: string;
+}
+
+interface Categorie {
+  _id: string;
+  nom: string;
+  typeProduit: string;
+  prioriteRedistribution: string;
+  dureeConservationEstimee: number;
+}
+
+interface Annonce {
+  _id: string;
+  auteur: Utilisateur;
+  type: 'OFFRE' | 'DEMANDE';
+  titre: string;
+  description: string;
+  categorieDonation: Categorie;
+  quantiteEstimee: number;
+  unite: string;
+  urgence: string;
+  adresse: string;
+  localisation: Coordonnees;
+  dateExpiration: string;
+  statut: string;
+  createdAt: string;
+}
+
+interface Suggestion {
+  monAnnonce: { id: string; titre: string; type: string };
+  annonceCompatible: {
+    id: string;
+    titre: string;
+    type: string;
+    auteur: Utilisateur;
+  };
+  score: number;
+  criteres: Record<string, number>;
+  distanceKm: number;
+}
+
+interface Matching {
+  _id: string;
+  offre: Pick<Annonce, '_id' | 'titre' | 'type' | 'quantiteEstimee' | 'unite'>;
+  demande: Pick<Annonce, '_id' | 'titre' | 'type' | 'quantiteEstimee' | 'unite'>;
+  score: number;
+  distanceKm: number;
+  statut: string;
+  criteres: Record<string, number>;
+}
+
+interface Conversation {
+  _id: string;
+  participants: Utilisateur[];
+  annonce: Pick<Annonce, '_id' | 'titre' | 'type' | 'statut'>;
+  statut: string;
+  dernierMessageAt?: string;
+}
+
+interface Message {
+  _id: string;
+  expediteur: Utilisateur;
+  contenu: string;
+  createdAt: string;
+  luPar: string[];
 }
 
 interface Partie {
@@ -67,22 +151,15 @@ interface PointCarte {
   transporteur: string | null;
 }
 
-interface Coordonnees {
-  latitude: number;
-  longitude: number;
-}
-
-interface Kpis {
-  collectesTotal: number;
-  collectesActives: number;
-  livraisonsTerminees: number;
-  poidsLivreKg: number;
-  dureeMoyenneMinutes: number;
-  tauxPonctualite: number;
-}
-
-interface DashboardResponse {
-  kpis: Kpis;
+interface DashboardLogistique {
+  kpis: {
+    collectesTotal: number;
+    collectesActives: number;
+    livraisonsTerminees: number;
+    poidsLivreKg: number;
+    dureeMoyenneMinutes: number;
+    tauxPonctualite: number;
+  };
   parStatut: Record<string, number>;
   activite: Array<{ date: string; livraisons: number }>;
   alertes: Array<{
@@ -97,6 +174,24 @@ interface Transporteur extends Partie {
   collectesActives: number;
 }
 
+interface DashboardAdmin {
+  utilisateurs: {
+    total: number;
+    parRole: Array<{ _id: string; total: number }>;
+    parStatut: Array<{ _id: string; total: number }>;
+  };
+  donations: number;
+  annonces: number;
+  collectes: number;
+}
+
+interface CompteDemo {
+  role: string;
+  label: string;
+  email: string;
+  description: string;
+}
+
 @Component({
   selector: 'app-root',
   imports: [CommonModule, FormsModule],
@@ -109,64 +204,207 @@ export class App implements OnInit, OnDestroy {
   private markers?: L.LayerGroup;
   private mapElement?: HTMLDivElement;
 
+  protected readonly comptesDemo: CompteDemo[] = [
+    {
+      role: 'ADMIN',
+      label: 'Administrateur',
+      email: 'admin@rescuefood.demo',
+      description: 'Utilisateurs, logistique et statistiques globales'
+    },
+    {
+      role: 'FOURNISSEUR',
+      label: 'Fournisseur',
+      email: 'marche.centre@rescuefood.demo',
+      description: 'Offres, suggestions et conversations'
+    },
+    {
+      role: 'ONG',
+      label: 'ONG',
+      email: 'solidarite@rescuefood.demo',
+      description: 'Demandes, matching et suivi des collectes'
+    },
+    {
+      role: 'TRANSPORTEUR',
+      label: 'Transporteur',
+      email: 'transport@rescuefood.demo',
+      description: 'Missions, statuts et suivi GPS'
+    },
+    {
+      role: 'CITOYEN',
+      label: 'Citoyen',
+      email: 'citoyen@rescuefood.demo',
+      description: 'Consultation publique des annonces'
+    }
+  ];
+
+  protected readonly section = signal<Section>('overview');
   protected readonly email = signal('admin@rescuefood.demo');
   protected readonly motDePasse = signal('Demo1234!');
   protected readonly utilisateur = signal<Utilisateur | null>(null);
   protected readonly chargement = signal(false);
   protected readonly chargementConnexion = signal(false);
   protected readonly erreur = signal('');
-  protected readonly filtreStatut = signal('TOUS');
-  protected readonly recherche = signal('');
+  protected readonly succes = signal('');
+
+  protected readonly categories = signal<Categorie[]>([]);
+  protected readonly annonces = signal<Annonce[]>([]);
+  protected readonly mesAnnonces = signal<Annonce[]>([]);
+  protected readonly suggestions = signal<Suggestion[]>([]);
+  protected readonly matchings = signal<Matching[]>([]);
+  protected readonly conversations = signal<Conversation[]>([]);
+  protected readonly messages = signal<Message[]>([]);
+  protected readonly conversationSelectionnee = signal<Conversation | null>(null);
+  protected readonly nouveauMessage = signal('');
+  protected readonly filtreAnnonce = signal<'TOUS' | 'OFFRE' | 'DEMANDE'>('TOUS');
+  protected readonly rechercheAnnonce = signal('');
+  protected readonly formulaireAnnonceOuvert = signal(false);
+  protected readonly annonceForm = {
+    titre: '',
+    description: '',
+    categorieDonation: '',
+    quantiteEstimee: 10,
+    unite: 'KG',
+    urgence: 'MOYENNE',
+    adresse: '',
+    latitude: 36.8065,
+    longitude: 10.1815,
+    dateExpiration: ''
+  };
+
+  protected readonly collectes = signal<Collecte[]>([]);
+  protected readonly pointsCarte = signal<PointCarte[]>([]);
+  protected readonly transporteurs = signal<Transporteur[]>([]);
   protected readonly collecteSelectionnee = signal<Collecte | null>(null);
   protected readonly transporteurSelectionne = signal('');
   protected readonly vehicule = signal('');
-  protected readonly transporteurs = signal<Transporteur[]>([]);
-  protected readonly collectes = signal<Collecte[]>([]);
-  protected readonly pointsCarte = signal<PointCarte[]>([]);
-  protected readonly dashboard = signal<DashboardResponse>({
-    kpis: {
-      collectesTotal: 0,
-      collectesActives: 0,
-      livraisonsTerminees: 0,
-      poidsLivreKg: 0,
-      dureeMoyenneMinutes: 0,
-      tauxPonctualite: 100
-    },
-    parStatut: {},
-    activite: [],
-    alertes: []
-  });
-
-  protected readonly collectesFiltrees = computed(() => {
-    const statut = this.filtreStatut();
-    const texte = this.recherche().trim().toLowerCase();
-    return this.collectes().filter((collecte) => {
-      const correspondStatut = statut === 'TOUS' || collecte.statut === statut;
-      const contenu =
-        `${collecte.reference} ${collecte.donation?.titre} ${collecte.adresseDepart} ${collecte.adresseArrivee}`.toLowerCase();
-      return correspondStatut && (!texte || contenu.includes(texte));
-    });
-  });
-
-  protected readonly maximumActivite = computed(() =>
-    Math.max(1, ...this.dashboard().activite.map(({ livraisons }) => livraisons))
+  protected readonly filtreStatut = signal('TOUS');
+  protected readonly rechercheCollecte = signal('');
+  protected readonly dashboardLogistique = signal<DashboardLogistique>(
+    this.dashboardLogistiqueVide()
   );
+
+  protected readonly dashboardAdmin = signal<DashboardAdmin | null>(null);
+  protected readonly utilisateurs = signal<Utilisateur[]>([]);
+  protected readonly editionUtilisateur = signal<Utilisateur | null>(null);
+  protected readonly roleUtilisateur = signal('');
+  protected readonly statutUtilisateur = signal('');
+
+  protected readonly profilTelephone = signal('');
+  protected readonly profilAdresse = signal('');
+
   protected readonly dateDuJour = new Intl.DateTimeFormat('fr-FR', {
     weekday: 'long',
     day: 'numeric',
     month: 'long'
   }).format(new Date());
 
+  protected readonly navigation = computed(() => {
+    const role = this.utilisateur()?.role;
+    const items: Array<{ id: Section; label: string; icon: string }> = [
+      { id: 'overview', label: 'Vue générale', icon: '⌂' },
+      { id: 'annonces', label: 'Annonces', icon: '▤' }
+    ];
+
+    if (role === 'FOURNISSEUR' || role === 'ONG') {
+      items.push({ id: 'matching', label: 'Matching', icon: '◇' });
+    }
+    if (role !== 'CITOYEN') {
+      items.push({ id: 'messages', label: 'Messages', icon: '◫' });
+    }
+    if (['ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'].includes(role || '')) {
+      items.push({ id: 'logistique', label: 'Logistique', icon: '↗' });
+    }
+    if (role === 'ADMIN') {
+      items.push({ id: 'admin', label: 'Administration', icon: '⚙' });
+    }
+    items.push({ id: 'profile', label: 'Mon profil', icon: '○' });
+    items.push({ id: 'diagnostic', label: 'Diagnostic', icon: '✓' });
+    return items;
+  });
+
+  protected readonly annoncesFiltrees = computed(() => {
+    const filtre = this.filtreAnnonce();
+    const recherche = this.rechercheAnnonce().trim().toLowerCase();
+    return this.annonces().filter((annonce) => {
+      const typeOk = filtre === 'TOUS' || annonce.type === filtre;
+      const texte =
+        `${annonce.titre} ${annonce.description} ${annonce.auteur?.nom} ${annonce.categorieDonation?.nom}`.toLowerCase();
+      return typeOk && (!recherche || texte.includes(recherche));
+    });
+  });
+
+  protected readonly collectesFiltrees = computed(() => {
+    const statut = this.filtreStatut();
+    const texte = this.rechercheCollecte().trim().toLowerCase();
+    return this.collectes().filter((collecte) => {
+      const statutOk = statut === 'TOUS' || collecte.statut === statut;
+      const contenu =
+        `${collecte.reference} ${collecte.donation?.titre} ${collecte.adresseDepart} ${collecte.adresseArrivee}`.toLowerCase();
+      return statutOk && (!texte || contenu.includes(texte));
+    });
+  });
+
+  protected readonly maximumActivite = computed(() =>
+    Math.max(
+      1,
+      ...this.dashboardLogistique().activite.map(({ livraisons }) => livraisons)
+    )
+  );
+
+  protected readonly couverture = computed(() => {
+    const role = this.utilisateur()?.role;
+    return [
+      {
+        nom: 'Authentification',
+        disponible: true,
+        detail: `Session ${role || 'inconnue'} active`
+      },
+      {
+        nom: 'Annonces',
+        disponible: true,
+        detail: `${this.annonces().length} annonce(s) chargée(s)`
+      },
+      {
+        nom: 'Matching',
+        disponible: role === 'FOURNISSEUR' || role === 'ONG',
+        detail: `${this.matchings().length} matching(s)`
+      },
+      {
+        nom: 'Messagerie',
+        disponible: role !== 'CITOYEN',
+        detail: `${this.conversations().length} conversation(s)`
+      },
+      {
+        nom: 'Logistique',
+        disponible: ['ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'].includes(
+          role || ''
+        ),
+        detail: `${this.collectes().length} collecte(s)`
+      },
+      {
+        nom: 'Administration',
+        disponible: role === 'ADMIN',
+        detail: `${this.utilisateurs().length} utilisateur(s)`
+      },
+      {
+        nom: 'Inventaire / donations',
+        disponible: true,
+        detail: 'CRUD /api/donations disponible, interface dédiée à connecter'
+      }
+    ];
+  });
+
   @ViewChild('mapContainer')
   set mapContainer(element: ElementRef<HTMLDivElement> | undefined) {
     this.mapElement = element?.nativeElement;
-    if (this.mapElement) {
+    if (this.mapElement && this.section() === 'logistique') {
       window.setTimeout(() => this.initialiserCarte());
     }
   }
 
   ngOnInit(): void {
     const token = localStorage.getItem('rescuefood_token');
+    this.chargerDonneesPubliques();
     if (!token) return;
 
     this.http
@@ -175,10 +413,10 @@ export class App implements OnInit, OnDestroy {
       })
       .subscribe({
         next: ({ user }) => {
-          this.utilisateur.set(user);
-          this.chargerDonnees();
+          this.initialiserUtilisateur(user);
+          this.chargerTout();
         },
-        error: () => this.deconnexion()
+        error: () => this.deconnexion(false)
       });
   }
 
@@ -186,9 +424,14 @@ export class App implements OnInit, OnDestroy {
     this.map?.remove();
   }
 
+  protected choisirCompte(compte: CompteDemo): void {
+    this.email.set(compte.email);
+    this.motDePasse.set('Demo1234!');
+  }
+
   protected connexion(): void {
     this.chargementConnexion.set(true);
-    this.erreur.set('');
+    this.effacerMessages();
     this.http
       .post<{ accessToken: string; user: Utilisateur }>('/api/auth/login', {
         email: this.email(),
@@ -197,9 +440,10 @@ export class App implements OnInit, OnDestroy {
       .subscribe({
         next: ({ accessToken, user }) => {
           localStorage.setItem('rescuefood_token', accessToken);
-          this.utilisateur.set(user);
+          this.initialiserUtilisateur(user);
           this.chargementConnexion.set(false);
-          this.chargerDonnees();
+          this.section.set('overview');
+          this.chargerTout();
         },
         error: (error) => {
           this.chargementConnexion.set(false);
@@ -211,59 +455,206 @@ export class App implements OnInit, OnDestroy {
       });
   }
 
-  protected deconnexion(): void {
+  protected deconnexion(appelerApi = true): void {
+    if (appelerApi && this.utilisateur()) {
+      this.http
+        .post('/api/auth/logout', {}, { headers: this.entetes() })
+        .subscribe({ error: () => undefined });
+    }
     localStorage.removeItem('rescuefood_token');
     this.utilisateur.set(null);
+    this.section.set('overview');
     this.collectes.set([]);
+    this.conversations.set([]);
+    this.matchings.set([]);
+    this.suggestions.set([]);
+    this.utilisateurs.set([]);
     this.map?.remove();
     this.map = undefined;
   }
 
-  protected chargerDonnees(): void {
-    const headers = this.entetes();
-    this.chargement.set(true);
-    this.erreur.set('');
-    const transporteurs =
-      this.utilisateur()?.role === 'ADMIN'
-        ? this.http.get<{ transporteurs: Transporteur[] }>(
-            '/api/logistique/transporteurs',
-            { headers }
-          )
-        : of({ transporteurs: [] });
+  protected naviguer(section: Section): void {
+    this.section.set(section);
+    this.effacerMessages();
+    if (section === 'logistique') {
+      window.setTimeout(() => this.initialiserCarte());
+    }
+  }
 
-    forkJoin({
-      dashboard: this.http.get<DashboardResponse>(
-        '/api/logistique/dashboard',
-        { headers }
-      ),
-      collectes: this.http.get<{ collectes: Collecte[] }>(
-        '/api/logistique/collectes?limite=100',
-        { headers }
-      ),
-      carte: this.http.get<{ points: PointCarte[] }>('/api/logistique/carte', {
-        headers
-      }),
-      transporteurs
-    }).subscribe({
-      next: ({ dashboard, collectes, carte, transporteurs: resultat }) => {
-        this.dashboard.set(dashboard);
-        this.collectes.set(collectes.collectes);
-        this.pointsCarte.set(carte.points);
-        this.transporteurs.set(resultat.transporteurs);
-        this.chargement.set(false);
-        this.mettreAJourCarte();
-      },
-      error: (error) => {
-        this.chargement.set(false);
-        if (error.status === 401) {
-          this.deconnexion();
-          return;
-        }
-        this.erreur.set(
-          error.error?.message || 'Les données logistiques sont indisponibles.'
-        );
-      }
-    });
+  protected chargerTout(): void {
+    this.chargement.set(true);
+    this.chargerDonneesPubliques();
+    this.chargerConversations();
+    const role = this.utilisateur()?.role;
+
+    if (role === 'FOURNISSEUR' || role === 'ONG') {
+      this.chargerMesAnnonces();
+      this.chargerMatching();
+    }
+    if (['ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'].includes(role || '')) {
+      this.chargerLogistique();
+    }
+    if (role === 'ADMIN') {
+      this.chargerAdministration();
+    }
+    window.setTimeout(() => this.chargement.set(false), 350);
+  }
+
+  protected peutPublier(): boolean {
+    return ['FOURNISSEUR', 'ONG'].includes(this.utilisateur()?.role || '');
+  }
+
+  protected ouvrirFormulaireAnnonce(): void {
+    const utilisateur = this.utilisateur();
+    this.annonceForm.titre = '';
+    this.annonceForm.description = '';
+    this.annonceForm.categorieDonation = this.categories()[0]?._id || '';
+    this.annonceForm.quantiteEstimee = 10;
+    this.annonceForm.unite = 'KG';
+    this.annonceForm.urgence = 'MOYENNE';
+    this.annonceForm.adresse = utilisateur?.adresse || '';
+    this.annonceForm.latitude = utilisateur?.localisation?.latitude || 36.8065;
+    this.annonceForm.longitude = utilisateur?.localisation?.longitude || 10.1815;
+    const expiration = new Date();
+    expiration.setDate(expiration.getDate() + 2);
+    this.annonceForm.dateExpiration = expiration.toISOString().slice(0, 16);
+    this.formulaireAnnonceOuvert.set(true);
+  }
+
+  protected creerAnnonce(): void {
+    const role = this.utilisateur()?.role;
+    const type = role === 'FOURNISSEUR' ? 'OFFRE' : 'DEMANDE';
+    this.http
+      .post(
+        '/api/annonces',
+        {
+          type,
+          titre: this.annonceForm.titre,
+          description: this.annonceForm.description,
+          categorieDonation: this.annonceForm.categorieDonation,
+          quantiteEstimee: Number(this.annonceForm.quantiteEstimee),
+          unite: this.annonceForm.unite,
+          urgence: this.annonceForm.urgence,
+          adresse: this.annonceForm.adresse,
+          localisation: {
+            latitude: Number(this.annonceForm.latitude),
+            longitude: Number(this.annonceForm.longitude)
+          },
+          dateExpiration: new Date(
+            this.annonceForm.dateExpiration
+          ).toISOString()
+        },
+        { headers: this.entetes() }
+      )
+      .subscribe({
+        next: () => {
+          this.formulaireAnnonceOuvert.set(false);
+          this.notifier('Annonce publiée avec succès.');
+          this.chargerDonneesPubliques();
+          this.chargerMesAnnonces();
+          this.chargerMatching();
+        },
+        error: (error) => this.signaler(error, 'Publication impossible.')
+      });
+  }
+
+  protected annulerAnnonce(annonce: Annonce): void {
+    this.http
+      .delete(`/api/annonces/${annonce._id}`, { headers: this.entetes() })
+      .subscribe({
+        next: () => {
+          this.notifier('Annonce annulée.');
+          this.chargerDonneesPubliques();
+          this.chargerMesAnnonces();
+        },
+        error: (error) => this.signaler(error, 'Annulation impossible.')
+      });
+  }
+
+  protected accepterSuggestion(suggestion: Suggestion): void {
+    const offreId =
+      suggestion.monAnnonce.type === 'OFFRE'
+        ? suggestion.monAnnonce.id
+        : suggestion.annonceCompatible.id;
+    const demandeId =
+      suggestion.monAnnonce.type === 'DEMANDE'
+        ? suggestion.monAnnonce.id
+        : suggestion.annonceCompatible.id;
+
+    this.http
+      .post(
+        '/api/matchings',
+        { offreId, demandeId },
+        { headers: this.entetes() }
+      )
+      .subscribe({
+        next: () => {
+          this.notifier('Matching accepté et conversation créée.');
+          this.chargerMatching();
+          this.chargerConversations();
+          this.chargerDonneesPubliques();
+        },
+        error: (error) => this.signaler(error, 'Matching impossible.')
+      });
+  }
+
+  protected refuserMatching(matching: Matching): void {
+    this.http
+      .patch(
+        `/api/matchings/${matching._id}/refuser`,
+        {},
+        { headers: this.entetes() }
+      )
+      .subscribe({
+        next: () => {
+          this.notifier('Matching refusé.');
+          this.chargerMatching();
+          this.chargerDonneesPubliques();
+        },
+        error: (error) => this.signaler(error, 'Refus impossible.')
+      });
+  }
+
+  protected ouvrirConversation(conversation: Conversation): void {
+    this.conversationSelectionnee.set(conversation);
+    this.messages.set([]);
+    this.http
+      .get<{ messages: Message[] }>(
+        `/api/conversations/${conversation._id}/messages`,
+        { headers: this.entetes() }
+      )
+      .subscribe({
+        next: ({ messages }) => this.messages.set(messages),
+        error: (error) => this.signaler(error, 'Messages indisponibles.')
+      });
+  }
+
+  protected envoyerMessage(): void {
+    const conversation = this.conversationSelectionnee();
+    const contenu = this.nouveauMessage().trim();
+    if (!conversation || !contenu) return;
+
+    this.http
+      .post(
+        `/api/conversations/${conversation._id}/messages`,
+        { contenu },
+        { headers: this.entetes() }
+      )
+      .subscribe({
+        next: () => {
+          this.nouveauMessage.set('');
+          this.ouvrirConversation(conversation);
+          this.chargerConversations();
+        },
+        error: (error) => this.signaler(error, 'Envoi impossible.')
+      });
+  }
+
+  protected autreParticipant(conversation: Conversation): Utilisateur | undefined {
+    const id = this.utilisateur()?.id || this.utilisateur()?._id;
+    return conversation.participants.find(
+      (participant) => (participant.id || participant._id) !== id
+    );
   }
 
   protected ouvrirCollecte(collecte: Collecte): void {
@@ -279,7 +670,6 @@ export class App implements OnInit, OnDestroy {
   protected assigner(): void {
     const collecte = this.collecteSelectionnee();
     if (!collecte || !this.transporteurSelectionne()) return;
-
     this.http
       .patch(
         `/api/logistique/collectes/${collecte._id}/assignation`,
@@ -292,10 +682,10 @@ export class App implements OnInit, OnDestroy {
       .subscribe({
         next: () => {
           this.collecteSelectionnee.set(null);
-          this.chargerDonnees();
+          this.notifier('Transporteur assigné.');
+          this.chargerLogistique();
         },
-        error: (error) =>
-          this.erreur.set(error.error?.message || 'Assignation impossible.')
+        error: (error) => this.signaler(error, 'Assignation impossible.')
       });
   }
 
@@ -309,10 +699,31 @@ export class App implements OnInit, OnDestroy {
       .subscribe({
         next: () => {
           this.collecteSelectionnee.set(null);
-          this.chargerDonnees();
+          this.notifier(`Collecte passée au statut ${this.libelleStatut(statut)}.`);
+          this.chargerLogistique();
         },
-        error: (error) =>
-          this.erreur.set(error.error?.message || 'Mise à jour impossible.')
+        error: (error) => this.signaler(error, 'Mise à jour impossible.')
+      });
+  }
+
+  protected envoyerPosition(collecte: Collecte): void {
+    const position = collecte.transporteur
+      ? { latitude: 36.81, longitude: 10.18 }
+      : undefined;
+    if (!position) return;
+
+    this.http
+      .patch(
+        `/api/logistique/collectes/${collecte._id}/position`,
+        position,
+        { headers: this.entetes() }
+      )
+      .subscribe({
+        next: () => {
+          this.notifier('Position GPS de test envoyée.');
+          this.chargerLogistique();
+        },
+        error: (error) => this.signaler(error, 'Position refusée.')
       });
   }
 
@@ -332,25 +743,81 @@ export class App implements OnInit, OnDestroy {
             .slice(0, 10)}.pdf`;
           lien.click();
           URL.revokeObjectURL(url);
+          this.notifier('Rapport PDF généré.');
         },
-        error: () => this.erreur.set('Le rapport PDF n’a pas pu être généré.')
+        error: (error) => this.signaler(error, 'Rapport indisponible.')
+      });
+  }
+
+  protected editerAcces(utilisateur: Utilisateur): void {
+    this.editionUtilisateur.set(utilisateur);
+    this.roleUtilisateur.set(utilisateur.role);
+    this.statutUtilisateur.set(utilisateur.statutCompte || 'EN_ATTENTE');
+  }
+
+  protected enregistrerAcces(): void {
+    const utilisateur = this.editionUtilisateur();
+    if (!utilisateur?._id) return;
+    this.http
+      .patch(
+        `/api/admin/users/${utilisateur._id}/access`,
+        {
+          role: this.roleUtilisateur(),
+          statutCompte: this.statutUtilisateur()
+        },
+        { headers: this.entetes() }
+      )
+      .subscribe({
+        next: () => {
+          this.editionUtilisateur.set(null);
+          this.notifier('Accès utilisateur mis à jour.');
+          this.chargerAdministration();
+        },
+        error: (error) => this.signaler(error, 'Modification impossible.')
+      });
+  }
+
+  protected enregistrerProfil(): void {
+    this.http
+      .patch(
+        '/api/auth/me',
+        {
+          telephone: this.profilTelephone(),
+          adresse: this.profilAdresse()
+        },
+        { headers: this.entetes() }
+      )
+      .subscribe({
+        next: (resultat: any) => {
+          this.initialiserUtilisateur(resultat.user);
+          this.notifier('Profil mis à jour.');
+        },
+        error: (error) => this.signaler(error, 'Profil non modifié.')
       });
   }
 
   protected libelleStatut(statut: string): string {
     const libelles: Record<string, string> = {
-      TOUS: 'Toutes',
+      TOUS: 'Tous',
       A_ASSIGNER: 'À assigner',
       PLANIFIEE: 'Planifiée',
       EN_ROUTE: 'En route',
       COLLECTEE: 'Collectée',
       LIVREE: 'Livrée',
-      ANNULEE: 'Annulée'
+      ANNULEE: 'Annulée',
+      ACTIVE: 'Active',
+      MATCHEE: 'Matchée',
+      CLOTUREE: 'Clôturée',
+      EXPIREE: 'Expirée',
+      ACCEPTE: 'Accepté',
+      REFUSE: 'Refusé',
+      CONVERTI_EN_DON: 'Converti en don'
     };
     return libelles[statut] || statut;
   }
 
-  protected dateCourte(date: string): string {
+  protected dateCourte(date?: string): string {
+    if (!date) return 'Non renseignée';
     return new Intl.DateTimeFormat('fr-FR', {
       day: '2-digit',
       month: 'short',
@@ -365,6 +832,10 @@ export class App implements OnInit, OnDestroy {
     );
   }
 
+  protected pourcentage(score: number): string {
+    return `${Math.round(score * 100)}%`;
+  }
+
   protected statutsActionnables(collecte: Collecte): string[] {
     if (collecte.statut === 'A_ASSIGNER' && !collecte.transporteur) {
       return collecte.prochainsStatuts.filter((statut) => statut === 'ANNULEE');
@@ -372,20 +843,192 @@ export class App implements OnInit, OnDestroy {
     return collecte.prochainsStatuts;
   }
 
-  protected initiales(): string {
-    const utilisateur = this.utilisateur();
+  protected initiales(utilisateur = this.utilisateur()): string {
     return utilisateur
       ? `${utilisateur.prenom?.[0] || ''}${utilisateur.nom?.[0] || ''}`
       : 'RF';
+  }
+
+  protected totalParRole(role: string): number {
+    return (
+      this.dashboardAdmin()?.utilisateurs.parRole.find(
+        (item) => item._id === role
+      )?.total || 0
+    );
+  }
+
+  private initialiserUtilisateur(user: Utilisateur): void {
+    this.utilisateur.set(user);
+    this.profilTelephone.set(user.telephone || '');
+    this.profilAdresse.set(user.adresse || '');
+  }
+
+  private chargerDonneesPubliques(): void {
+    this.http.get<{ categories: Categorie[] }>('/api/categories').subscribe({
+      next: ({ categories }) => this.categories.set(categories),
+      error: (error) => this.signaler(error, 'Catégories indisponibles.')
+    });
+    this.http.get<{ annonces: Annonce[] }>('/api/annonces').subscribe({
+      next: ({ annonces }) => this.annonces.set(annonces),
+      error: (error) => this.signaler(error, 'Annonces indisponibles.')
+    });
+  }
+
+  private chargerMesAnnonces(): void {
+    this.http
+      .get<{ annonces: Annonce[] }>('/api/annonces/user/mes-annonces', {
+        headers: this.entetes()
+      })
+      .subscribe({
+        next: ({ annonces }) => this.mesAnnonces.set(annonces),
+        error: (error) => this.signaler(error, 'Vos annonces sont indisponibles.')
+      });
+  }
+
+  private chargerMatching(): void {
+    this.http
+      .get<{ suggestions: Suggestion[] }>('/api/matchings/suggestions', {
+        headers: this.entetes()
+      })
+      .subscribe({
+        next: ({ suggestions }) => this.suggestions.set(suggestions),
+        error: (error) => this.signaler(error, 'Suggestions indisponibles.')
+      });
+    this.http
+      .get<{ matchings: Matching[] }>('/api/matchings', {
+        headers: this.entetes()
+      })
+      .subscribe({
+        next: ({ matchings }) => this.matchings.set(matchings),
+        error: (error) => this.signaler(error, 'Matchings indisponibles.')
+      });
+  }
+
+  private chargerConversations(): void {
+    if (!this.utilisateur() || this.utilisateur()?.role === 'CITOYEN') return;
+    this.http
+      .get<{ conversations: Conversation[] }>('/api/conversations', {
+        headers: this.entetes()
+      })
+      .subscribe({
+        next: ({ conversations }) => {
+          this.conversations.set(conversations);
+          const selection = this.conversationSelectionnee();
+          if (selection) {
+            const actualisee = conversations.find(
+              (conversation) => conversation._id === selection._id
+            );
+            if (actualisee) this.conversationSelectionnee.set(actualisee);
+          }
+        },
+        error: (error) => this.signaler(error, 'Conversations indisponibles.')
+      });
+  }
+
+  private chargerLogistique(): void {
+    const headers = this.entetes();
+    this.http
+      .get<DashboardLogistique>('/api/logistique/dashboard', { headers })
+      .subscribe({
+        next: (dashboard) => this.dashboardLogistique.set(dashboard),
+        error: (error) => this.signaler(error, 'KPIs logistiques indisponibles.')
+      });
+    this.http
+      .get<{ collectes: Collecte[] }>(
+        '/api/logistique/collectes?limite=100',
+        { headers }
+      )
+      .subscribe({
+        next: ({ collectes }) => this.collectes.set(collectes),
+        error: (error) => this.signaler(error, 'Collectes indisponibles.')
+      });
+    this.http
+      .get<{ points: PointCarte[] }>('/api/logistique/carte', { headers })
+      .subscribe({
+        next: ({ points }) => {
+          this.pointsCarte.set(points);
+          this.mettreAJourCarte();
+        },
+        error: (error) => this.signaler(error, 'Carte indisponible.')
+      });
+    if (this.utilisateur()?.role === 'ADMIN') {
+      this.http
+        .get<{ transporteurs: Transporteur[] }>(
+          '/api/logistique/transporteurs',
+          { headers }
+        )
+        .subscribe({
+          next: ({ transporteurs }) => this.transporteurs.set(transporteurs),
+          error: (error) =>
+            this.signaler(error, 'Transporteurs indisponibles.')
+        });
+    }
+  }
+
+  private chargerAdministration(): void {
+    const headers = this.entetes();
+    this.http
+      .get<DashboardAdmin>('/api/admin/dashboard', { headers })
+      .subscribe({
+        next: (dashboard) => this.dashboardAdmin.set(dashboard),
+        error: (error) =>
+          this.signaler(error, 'Statistiques administrateur indisponibles.')
+      });
+    this.http
+      .get<{ users: Utilisateur[] }>('/api/admin/users', { headers })
+      .subscribe({
+        next: ({ users }) => this.utilisateurs.set(users),
+        error: (error) => this.signaler(error, 'Utilisateurs indisponibles.')
+      });
   }
 
   private entetes(token = localStorage.getItem('rescuefood_token') || '') {
     return new HttpHeaders({ Authorization: `Bearer ${token}` });
   }
 
-  private initialiserCarte(): void {
-    if (!this.mapElement || this.map) return;
+  private notifier(message: string): void {
+    this.erreur.set('');
+    this.succes.set(message);
+    window.setTimeout(() => {
+      if (this.succes() === message) this.succes.set('');
+    }, 3500);
+  }
 
+  private signaler(error: any, message: string): void {
+    if (error?.status === 401) {
+      this.deconnexion(false);
+      return;
+    }
+    this.succes.set('');
+    this.erreur.set(error?.error?.message || message);
+  }
+
+  private effacerMessages(): void {
+    this.erreur.set('');
+    this.succes.set('');
+  }
+
+  private dashboardLogistiqueVide(): DashboardLogistique {
+    return {
+      kpis: {
+        collectesTotal: 0,
+        collectesActives: 0,
+        livraisonsTerminees: 0,
+        poidsLivreKg: 0,
+        dureeMoyenneMinutes: 0,
+        tauxPonctualite: 100
+      },
+      parStatut: {},
+      activite: [],
+      alertes: []
+    };
+  }
+
+  private initialiserCarte(): void {
+    if (!this.mapElement || this.map) {
+      this.map?.invalidateSize();
+      return;
+    }
     this.map = L.map(this.mapElement, {
       zoomControl: false,
       attributionControl: true
@@ -438,7 +1081,6 @@ export class App implements OnInit, OnDestroy {
       })
         .bindPopup(`<strong>${point.titre}</strong><br>${point.arrivee.adresse}`)
         .addTo(this.markers);
-
       if (point.positionActuelle && point.statut === 'EN_ROUTE') {
         const position: L.LatLngExpression = [
           point.positionActuelle.latitude,
@@ -460,7 +1102,6 @@ export class App implements OnInit, OnDestroy {
           .addTo(this.markers);
       }
     }
-
     if (limites.length) {
       this.map.fitBounds(L.latLngBounds(limites), {
         padding: [35, 35],

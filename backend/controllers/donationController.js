@@ -213,6 +213,15 @@ async function updateDonation(request, response, next) {
       return response.status(404).json({ message: 'Don introuvable' });
     }
 
+    if (
+      request.user.role !== 'ADMIN' &&
+      !donation.fournisseur.equals(request.user._id)
+    ) {
+      return response.status(403).json({
+        message: 'Vous ne pouvez modifier que vos propres dons'
+      });
+    }
+
     const {
       titre,
       description,
@@ -327,6 +336,15 @@ async function deleteDonation(request, response, next) {
 
     if (!donation) {
       return response.status(404).json({ message: 'Don introuvable' });
+    }
+
+    if (
+      request.user.role !== 'ADMIN' &&
+      !donation.fournisseur.equals(request.user._id)
+    ) {
+      return response.status(403).json({
+        message: 'Vous ne pouvez supprimer que vos propres dons'
+      });
     }
 
     if (donation.statut === 'EN_COLLECTE' || donation.statut === 'LIVRE') {

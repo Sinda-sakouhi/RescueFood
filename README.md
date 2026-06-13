@@ -192,7 +192,19 @@ Authorization: Bearer VOTRE_JWT
 | `GET` | `/api/admin/users` | `ADMIN` | Lister tous les utilisateurs |
 | `PATCH` | `/api/admin/users/:id/access` | `ADMIN` | Modifier le rôle ou le statut d'un compte |
 | `GET` | `/api/annonces` | Public | Lister les annonces |
+| `GET` | `/api/categories` | Public | Lister les catégories de donation |
+| `GET` | `/api/categories/:id` | Public | Consulter une catégorie |
+| `POST` | `/api/categories` | `ADMIN` | Créer une catégorie |
+| `PUT` | `/api/categories/:id` | `ADMIN` | Modifier une catégorie |
+| `DELETE` | `/api/categories/:id` | `ADMIN` | Supprimer une catégorie |
+| `GET` | `/api/donations` | Authentifié | Lister et filtrer les donations |
+| `GET` | `/api/donations/:id` | Authentifié | Consulter une donation |
+| `POST` | `/api/donations` | `FOURNISSEUR` | Créer une donation |
+| `PUT` | `/api/donations/:id` | `FOURNISSEUR`, `ADMIN` | Modifier une donation |
+| `PATCH` | `/api/donations/:id/statut` | `ADMIN`, `ONG`, `TRANSPORTEUR` | Modifier le statut |
+| `DELETE` | `/api/donations/:id` | `FOURNISSEUR`, `ADMIN` | Supprimer une donation |
 | `GET` | `/api/annonces/:id` | Public | Consulter une annonce |
+| `GET` | `/api/annonces/suggestion-categorie` | Public | Suggérer une catégorie par mots-clés |
 | `GET` | `/api/annonces/user/mes-annonces` | Authentifié | Lister ses annonces |
 | `POST` | `/api/annonces` | `FOURNISSEUR`, `ONG` | Publier une offre ou une demande |
 | `PATCH` | `/api/annonces/:id` | `FOURNISSEUR`, `ONG` | Modifier sa propre annonce |
@@ -271,7 +283,8 @@ Réponses principales :
 ### `POST /api/auth/login`
 
 Vérifie les identifiants et retourne un JWT si le compte possède le statut
-`VALIDE`. La route est limitée à 10 tentatives par période de 15 minutes.
+`VALIDE`. La route est limitée à 10 tentatives échouées par adresse IP sur une
+période de 15 minutes. Les connexions réussies ne sont pas comptabilisées.
 
 Corps JSON :
 
@@ -440,6 +453,83 @@ Réponses principales :
 - `403` : utilisateur non administrateur ;
 - `404` : utilisateur introuvable.
 
+## API catégories et donations
+
+### Catégories
+
+`GET /api/categories` et `GET /api/categories/:id` sont publics. Les opérations
+`POST`, `PUT` et `DELETE` nécessitent un JWT administrateur.
+
+Exemple de réponse `200` :
+
+```json
+{
+  "categories": [
+    {
+      "_id": "OBJECT_ID",
+      "nom": "Fruits et légumes",
+      "description": "Fruits, légumes et produits frais",
+      "typeProduit": "FRUITS_LEGUMES",
+      "prioriteRedistribution": "ELEVEE",
+      "dureeConservationEstimee": 5
+    }
+  ]
+}
+```
+
+Corps de création :
+
+```json
+{
+  "nom": "Produits frais",
+  "description": "Fruits et légumes à redistribuer rapidement",
+  "typeProduit": "FRUITS_LEGUMES",
+  "prioriteRedistribution": "ELEVEE",
+  "dureeConservationEstimee": 5
+}
+```
+
+`PUT /api/categories/:id` accepte les mêmes champs de manière optionnelle.
+Réponses principales : `200`, `201`, `400`, `401`, `403`, `404`, `409`.
+
+### Donations
+
+Toutes les routes `/api/donations` nécessitent un JWT. La liste accepte les
+filtres `statut`, `urgence`, `categorie`, `fournisseur`, `beneficiaire`, `page`
+et `limit`.
+
+`POST /api/donations` est réservé au fournisseur :
+
+```json
+{
+  "titre": "Lot de pains frais",
+  "description": "Pains non vendus de la journée",
+  "categorieDonation": "OBJECT_ID",
+  "compositionLot": "10 baguettes et 5 pains complets",
+  "quantiteEstimee": 15,
+  "unite": "UNITE",
+  "poidsTotalKg": 5.5,
+  "images": ["https://example.com/pains.jpg"],
+  "temperatureStockage": 20,
+  "conditionsStockage": "Conserver au sec",
+  "urgence": "ELEVEE",
+  "dateDisponibilite": "2026-06-13T18:00:00.000Z",
+  "dateLimiteCollecte": "2026-06-14T10:00:00.000Z",
+  "adresseCollecte": "12 rue de Marseille, Tunis",
+  "localisationCollecte": {
+    "latitude": 36.8037,
+    "longitude": 10.1811
+  }
+}
+```
+
+`PUT /api/donations/:id` modifie une donation. `PATCH
+/api/donations/:id/statut` accepte un statut parmi `CREE`,
+`EN_ATTENTE_VALIDATION`, `VALIDE`, `RESERVE`, `EN_COLLECTE`, `LIVRE` et
+`ANNULE`. Une donation en collecte ou déjà livrée ne peut pas être supprimée.
+
+Réponses principales : `200`, `201`, `400`, `401`, `403`, `404`.
+
 ## API annonces, matching et messagerie
 
 Sauf pour la lecture publique des annonces, les routes suivantes nécessitent
@@ -453,7 +543,8 @@ d'une annonce. `GET /api/annonces/user/mes-annonces` retourne les annonces de
 l'utilisateur connecté.
 
 `POST /api/annonces` permet à un fournisseur de publier une `OFFRE` et à une
-ONG de publier une `DEMANDE`.
+ONG de publier une `DEMANDE`. Si la catégorie est absente, elle est suggérée
+par mots-clés. L'urgence est calculée à partir de la date d'expiration.
 
 ```json
 {
@@ -487,9 +578,17 @@ Exemple de réponse de création :
     "_id": "OBJECT_ID",
     "type": "OFFRE",
     "statut": "ACTIVE"
+  },
+  "ia": {
+    "urgenceCalculee": "ELEVEE",
+    "raison": "Expiration proche"
   }
 }
 ```
+
+`GET /api/annonces/suggestion-categorie?titre=...&description=...` retourne la
+catégorie suggérée et sa fiche lorsqu'elle existe. Le paramètre `titre` est
+obligatoire.
 
 Réponses principales : `200`, `201`, `400`, `403`, `404`.
 
@@ -692,6 +791,7 @@ admin@rescuefood.demo
 marche.centre@rescuefood.demo
 solidarite@rescuefood.demo
 transport@rescuefood.demo
+citoyen@rescuefood.demo
 ```
 
 Mot de passe commun :
@@ -699,6 +799,23 @@ Mot de passe commun :
 ```text
 Demo1234!
 ```
+
+### Interface de démonstration multi-rôles
+
+Le frontend propose un sélecteur de compte sur la page de connexion. Chaque
+rôle affiche uniquement les modules qui lui sont autorisés :
+
+- administrateur : utilisateurs, accès, statistiques et toute la logistique ;
+- fournisseur : offres, matching, messagerie et suivi de ses collectes ;
+- ONG : demandes, matching, messagerie et suivi des livraisons ;
+- transporteur : missions, changements de statut et position GPS ;
+- citoyen : annonces publiques, profil et diagnostic.
+
+Les écrans couvrent les APIs actuellement exposées : authentification,
+administration, catégories, annonces, matching, messagerie et logistique. Les
+routes CRUD des catégories et donations sont également disponibles dans le
+backend et signalées dans le diagnostic. Une page frontend dédiée à la gestion
+de l'inventaire reste à connecter à ces routes.
 
 ## Règle obligatoire de documentation
 
