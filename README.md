@@ -129,12 +129,12 @@ npm run seed --prefix backend
 
 Cette commande crée les catégories et les données de démonstration :
 
-- 7 utilisateurs ;
-- 4 annonces ;
-- 1 matching automatique ;
-- 1 conversation et 2 messages ;
-- 3 donations ;
-- 3 collectes ;
+- 16 utilisateurs ;
+- 16 annonces ;
+- 7 matchings ;
+- 5 conversations et 10 messages ;
+- 8 donations ;
+- 8 collectes ;
 - 3 analyses IA ;
 - 1 rapport.
 
@@ -203,7 +203,9 @@ Les routes protégées nécessitent cet en-tête :
 Authorization: Bearer VOTRE_JWT
 ```
 
-### Résumé des endpoints
+### APIs communes et administration
+
+Ces routes transversales ne sont rattachées à aucune branche métier.
 
 | Méthode | Endpoint | Accès | Description |
 |---|---|---|---|
@@ -216,7 +218,33 @@ Authorization: Bearer VOTRE_JWT
 | `GET` | `/api/admin/dashboard` | `ADMIN` | Consulter les statistiques globales |
 | `GET` | `/api/admin/users` | `ADMIN` | Lister tous les utilisateurs |
 | `PATCH` | `/api/admin/users/:id/access` | `ADMIN` | Modifier le rôle ou le statut d'un compte |
-| `GET` | `/api/annonces` | Public | Lister les annonces |
+
+### APIs d'Aziz — Logistique et dashboard
+
+Branche responsable : `feature/logistique-dashboard`.
+
+| Méthode | Endpoint | Accès | Description |
+|---|---|---|---|
+| `GET` | `/api/logistique/dashboard` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Consulter les KPIs logistiques |
+| `GET` | `/api/logistique/carte` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Obtenir les trajets et positions |
+| `GET` | `/api/logistique/rapport.pdf` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Télécharger le rapport PDF |
+| `GET` | `/api/logistique/transporteurs` | `ADMIN` | Lister les transporteurs et leur charge |
+| `POST` | `/api/logistique/ia/itineraire/optimiser` | `ADMIN`, `TRANSPORTEUR` | Optimiser l'ordre des collectes |
+| `GET` | `/api/logistique/ia/collectes/:id/risque-retard` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Prédire le risque de retard |
+| `GET` | `/api/logistique/ia/collectes/:id/transporteurs-recommandes` | `ADMIN` | Classer les transporteurs |
+| `GET` | `/api/logistique/collectes` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Lister les collectes accessibles |
+| `GET` | `/api/logistique/collectes/:id` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Consulter une collecte |
+| `POST` | `/api/logistique/collectes` | `ADMIN` | Planifier une collecte |
+| `PATCH` | `/api/logistique/collectes/:id/assignation` | `ADMIN` | Assigner un transporteur |
+| `PATCH` | `/api/logistique/collectes/:id/statut` | `ADMIN`, `TRANSPORTEUR` | Faire avancer le workflow |
+| `PATCH` | `/api/logistique/collectes/:id/position` | `ADMIN`, `TRANSPORTEUR` | Enregistrer une position GPS |
+
+### APIs d'Amal — Inventaire et catégories
+
+Branche responsable : `feature-/inventaires-categorie`.
+
+| Méthode | Endpoint | Accès | Description |
+|---|---|---|---|
 | `GET` | `/api/categories` | Public | Lister les catégories de donation |
 | `GET` | `/api/categories/:id` | Public | Consulter une catégorie |
 | `POST` | `/api/categories` | `ADMIN` | Créer une catégorie |
@@ -228,6 +256,14 @@ Authorization: Bearer VOTRE_JWT
 | `PUT` | `/api/donations/:id` | `FOURNISSEUR`, `ADMIN` | Modifier une donation |
 | `PATCH` | `/api/donations/:id/statut` | `ADMIN`, `ONG`, `TRANSPORTEUR` | Modifier le statut |
 | `DELETE` | `/api/donations/:id` | `FOURNISSEUR`, `ADMIN` | Supprimer une donation |
+
+### APIs de Sinda — Annonces et matching
+
+Branche responsable : `feature/annonces-matching`.
+
+| Méthode | Endpoint | Accès | Description |
+|---|---|---|---|
+| `GET` | `/api/annonces` | Public | Lister les annonces |
 | `GET` | `/api/annonces/:id` | Public | Consulter une annonce |
 | `GET` | `/api/annonces/suggestion-categorie` | Public | Suggérer une catégorie par mots-clés |
 | `GET` | `/api/annonces/user/mes-annonces` | Authentifié | Lister ses annonces |
@@ -243,19 +279,6 @@ Authorization: Bearer VOTRE_JWT
 | `GET` | `/api/conversations/:id/messages` | Participant | Lire les messages |
 | `POST` | `/api/conversations/:id/messages` | Participant | Envoyer un message |
 | `PATCH` | `/api/conversations/messages/:id/lu` | Authentifié | Marquer un message comme lu |
-| `GET` | `/api/logistique/dashboard` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Consulter les KPIs logistiques |
-| `GET` | `/api/logistique/carte` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Obtenir les trajets et positions |
-| `GET` | `/api/logistique/rapport.pdf` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Télécharger le rapport PDF |
-| `GET` | `/api/logistique/transporteurs` | `ADMIN` | Lister les transporteurs et leur charge |
-| `POST` | `/api/logistique/ia/itineraire/optimiser` | `ADMIN`, `TRANSPORTEUR` | Optimiser l'ordre des collectes |
-| `GET` | `/api/logistique/ia/collectes/:id/risque-retard` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Prédire le risque de retard |
-| `GET` | `/api/logistique/ia/collectes/:id/transporteurs-recommandes` | `ADMIN` | Classer les transporteurs |
-| `GET` | `/api/logistique/collectes` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Lister les collectes accessibles |
-| `GET` | `/api/logistique/collectes/:id` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Consulter une collecte |
-| `POST` | `/api/logistique/collectes` | `ADMIN` | Planifier une collecte |
-| `PATCH` | `/api/logistique/collectes/:id/assignation` | `ADMIN` | Assigner un transporteur |
-| `PATCH` | `/api/logistique/collectes/:id/statut` | `ADMIN`, `TRANSPORTEUR` | Faire avancer le workflow |
-| `PATCH` | `/api/logistique/collectes/:id/position` | `ADMIN`, `TRANSPORTEUR` | Enregistrer une position GPS |
 
 ### `GET /api/health`
 
