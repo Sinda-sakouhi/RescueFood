@@ -905,8 +905,19 @@ Exemples :
 ```text
 admin@rescuefood.demo
 marche.centre@rescuefood.demo
+boulangerie.soleil@rescuefood.demo
+grossiste.nord@rescuefood.demo
+hotel.lac@rescuefood.demo
 solidarite@rescuefood.demo
+entraide@rescuefood.demo
+coeur.tunis@rescuefood.demo
+espoir.ariana@rescuefood.demo
 transport@rescuefood.demo
+leila.transport@rescuefood.demo
+karim.express@rescuefood.demo
+noura.froid@rescuefood.demo
+mehdi.livraison@rescuefood.demo
+ines.mobile@rescuefood.demo
 citoyen@rescuefood.demo
 ```
 
@@ -915,6 +926,12 @@ Mot de passe commun :
 ```text
 Demo1234!
 ```
+
+Le seeder enrichi crée 16 annonces, 7 matchings, 5 conversations, 8 donations
+et 8 collectes. Les six comptes transporteurs possèdent des positions et des
+charges différentes afin de démontrer le classement IA. Le compte
+`noura.froid@rescuefood.demo` possède deux missions actives pour tester
+l'optimisation d'une tournée multi-collectes.
 
 ### Interface de démonstration multi-rôles
 
