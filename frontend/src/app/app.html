@@ -1,4 +1,4 @@
-@if (!utilisateur()) {
+﻿@if (!utilisateur()) {
   <main class="login-shell">
     <section class="login-story">
       <div class="brand brand--light">
@@ -9,7 +9,7 @@
         <span class="eyebrow">Plateforme anti-gaspillage</span>
         <h1>Du surplus<br />à la solidarité.</h1>
         <p>
-          Publier, matcher, échanger, collecter et mesurer l’impact depuis une
+          Publier, matcher, échanger, collecter et mesurer l'impact depuis une
           seule interface.
         </p>
         <div class="flow-line">
@@ -25,65 +25,186 @@
     </section>
 
     <section class="login-panel">
-      <form class="login-card" (ngSubmit)="connexion()">
-        <div>
-          <span class="eyebrow">Environnement de démonstration</span>
-          <h2>Choisissez un rôle</h2>
-          <p>Chaque compte ouvre les fonctionnalités qui lui sont autorisées.</p>
-        </div>
+      @if (vueAuth() === 'connexion') {
+        <form class="login-card" (ngSubmit)="connexion()">
+          <div>
+            <span class="eyebrow">Environnement de démonstration</span>
+            <h2>Choisissez un rôle</h2>
+            <p>Chaque compte ouvre les fonctionnalités qui lui sont autorisées.</p>
+          </div>
 
-        <div class="demo-accounts">
-          @for (compte of comptesDemo; track compte.email) {
-            <button
-              class="demo-account"
-              [class.demo-account--selected]="email() === compte.email"
-              type="button"
-              (click)="choisirCompte(compte)"
-            >
-              <span class="demo-account__avatar">{{
-                compte.role.slice(0, 2)
-              }}</span>
-              <span>
-                <strong>{{ compte.label }}</strong>
-                <small>{{ compte.description }}</small>
-              </span>
-              <i>›</i>
-            </button>
+          <div class="demo-accounts">
+            @for (compte of comptesDemo; track compte.email) {
+              <button
+                class="demo-account"
+                [class.demo-account--selected]="email() === compte.email"
+                type="button"
+                (click)="choisirCompte(compte)"
+              >
+                <span class="demo-account__avatar">{{ compte.role.slice(0, 2) }}</span>
+                <span>
+                  <strong>{{ compte.label }}</strong>
+                  <small>{{ compte.description }}</small>
+                </span>
+                <i>›</i>
+              </button>
+            }
+          </div>
+
+          <div class="login-fields">
+            <label>
+              Adresse email
+              <input
+                type="email"
+                name="email"
+                [ngModel]="email()"
+                (ngModelChange)="email.set($event)"
+                required
+              />
+            </label>
+            <label>
+              Mot de passe
+              <input
+                type="password"
+                name="motDePasse"
+                [ngModel]="motDePasse()"
+                (ngModelChange)="motDePasse.set($event)"
+                required
+              />
+            </label>
+          </div>
+
+          @if (erreur()) {
+            <p class="form-message form-message--error">{{ erreur() }}</p>
           }
-        </div>
 
-        <div class="login-fields">
-          <label>
-            Adresse email
-            <input
-              type="email"
-              name="email"
-              [ngModel]="email()"
-              (ngModelChange)="email.set($event)"
-              required
-            />
-          </label>
-          <label>
-            Mot de passe
-            <input
-              type="password"
-              name="motDePasse"
-              [ngModel]="motDePasse()"
-              (ngModelChange)="motDePasse.set($event)"
-              required
-            />
-          </label>
-        </div>
+          <button class="button button--primary button--wide" type="submit">
+            {{ chargementConnexion() ? "Connexion…" : "Ouvrir l'espace de test" }}
+          </button>
+          <p class="demo-note">Mot de passe commun : <code>Demo1234!</code></p>
+          <p class="auth-switch">
+            Nouveau sur RescueFood ?
+            <button type="button" (click)="basculerVersInscription()">
+              Créer un compte
+            </button>
+          </p>
+        </form>
+      } @else {
+        @if (inscriptionSucces()) {
+          <div class="login-card register-success">
+            <div class="register-success__icon">✓</div>
+            <h2>Compte créé !</h2>
+            <p>{{ inscriptionSucces() }}</p>
+            <p class="register-success__hint">
+              Connectez-vous au compte <strong>Administrateur</strong> pour valider
+              votre inscription, puis revenez vous connecter.
+            </p>
+            <button
+              class="button button--primary button--wide"
+              type="button"
+              (click)="basculerVersConnexion()"
+            >
+              Retour à la connexion
+            </button>
+          </div>
+        } @else {
+          <form class="login-card" (ngSubmit)="inscrire()">
+            <div>
+              <span class="eyebrow">Inscription</span>
+              <h2>Créer un compte</h2>
+              <p>Choisissez votre rôle et renseignez vos informations.</p>
+            </div>
 
-        @if (erreur()) {
-          <p class="form-message form-message--error">{{ erreur() }}</p>
+            <div class="register-role-tabs">
+              @for (r of rolesInscription; track r.value) {
+                <button
+                  type="button"
+                  class="register-role-tab"
+                  [class.register-role-tab--active]="registerForm.role === r.value"
+                  (click)="registerForm.role = r.value"
+                >
+                  <strong>{{ r.label }}</strong>
+                  <small>{{ r.hint }}</small>
+                </button>
+              }
+            </div>
+
+            <div class="form-grid">
+              <label>
+                Prénom
+                <input
+                  name="prenom"
+                  [(ngModel)]="registerForm.prenom"
+                  required
+                  placeholder="Sami"
+                />
+              </label>
+              <label>
+                Nom
+                <input
+                  name="nom"
+                  [(ngModel)]="registerForm.nom"
+                  required
+                  placeholder="Ben Ali"
+                />
+              </label>
+              <label class="form-grid__wide">
+                Adresse email
+                <input
+                  type="email"
+                  name="regEmail"
+                  [(ngModel)]="registerForm.email"
+                  required
+                  placeholder="sami@example.com"
+                />
+              </label>
+              <label class="form-grid__wide">
+                Mot de passe
+                <input
+                  type="password"
+                  name="regMotDePasse"
+                  [(ngModel)]="registerForm.motDePasse"
+                  required
+                  minlength="8"
+                  placeholder="8 caractères minimum"
+                />
+              </label>
+              <label>
+                Téléphone
+                <input
+                  name="telephone"
+                  [(ngModel)]="registerForm.telephone"
+                  required
+                  placeholder="+216 XX XXX XXX"
+                />
+              </label>
+              <label class="form-grid__wide">
+                Adresse
+                <input
+                  name="adresse"
+                  [(ngModel)]="registerForm.adresse"
+                  required
+                  placeholder="12 rue de la Solidarité, Tunis"
+                />
+              </label>
+            </div>
+
+            @if (erreur()) {
+              <p class="form-message form-message--error">{{ erreur() }}</p>
+            }
+
+            <button class="button button--primary button--wide" type="submit">
+              {{ chargementInscription() ? "Création du compte…" : "S'inscrire" }}
+            </button>
+            <p class="auth-switch">
+              Déjà un compte ?
+              <button type="button" (click)="basculerVersConnexion()">
+                Se connecter
+              </button>
+            </p>
+          </form>
         }
-
-        <button class="button button--primary button--wide" type="submit">
-          {{ chargementConnexion() ? "Connexion…" : "Ouvrir l’espace de test" }}
-        </button>
-        <p class="demo-note">Mot de passe commun : <code>Demo1234!</code></p>
-      </form>
+      }
     </section>
   </main>
 } @else {
@@ -143,7 +264,7 @@
           @switch (section()) {
             @case ("overview") {
               <h1>Vue générale</h1>
-              <p>Le parcours complet de RescueFood en un coup d’œil.</p>
+              <p>Le parcours complet de RescueFood en un coup d'œil.</p>
             }
             @case ("annonces") {
               <h1>Annonces</h1>
@@ -288,7 +409,7 @@
                 @if (utilisateur()?.role === "ADMIN") {
                   <p>Validez des comptes, assignez un transporteur et exportez le rapport logistique.</p>
                 } @else if (utilisateur()?.role === "FOURNISSEUR") {
-                  <p>Publiez une offre, acceptez une suggestion puis écrivez à l’ONG.</p>
+                  <p>Publiez une offre, acceptez une suggestion puis écrivez à l'ONG.</p>
                 } @else if (utilisateur()?.role === "ONG") {
                   <p>Publiez une demande, consultez les offres compatibles et suivez la livraison.</p>
                 } @else if (utilisateur()?.role === "TRANSPORTEUR") {
@@ -346,15 +467,34 @@
                 </button>
               }
             </div>
-            <label class="search-field">
-              <span>⌕</span>
-              <input
-                type="search"
-                placeholder="Titre, auteur ou catégorie"
-                [ngModel]="rechercheAnnonce()"
-                (ngModelChange)="rechercheAnnonce.set($event)"
-              />
-            </label>
+            <div class="toolbar__filters">
+              <select
+                [ngModel]="filtreCategorie()"
+                (ngModelChange)="filtreCategorie.set($event)"
+              >
+                <option value="TOUS">Toutes catégories</option>
+                @for (categorie of categories(); track categorie._id) {
+                  <option [value]="categorie._id">{{ categorie.nom }}</option>
+                }
+              </select>
+              <select
+                [ngModel]="triAnnonce()"
+                (ngModelChange)="triAnnonce.set($any($event))"
+              >
+                <option value="RECENT">Plus récentes</option>
+                <option value="URGENCE">Urgence</option>
+                <option value="EXPIRATION">Expiration proche</option>
+              </select>
+              <label class="search-field">
+                <span>⌕</span>
+                <input
+                  type="search"
+                  placeholder="Titre, auteur ou catégorie"
+                  [ngModel]="rechercheAnnonce()"
+                  (ngModelChange)="rechercheAnnonce.set($event)"
+                />
+              </label>
+            </div>
           </section>
 
           @if (peutPublier()) {
@@ -377,7 +517,7 @@
                     }
                   </article>
                 } @empty {
-                  <p class="empty-inline">Vous n’avez pas encore d’annonce.</p>
+                  <p class="empty-inline">Vous n'avez pas encore d'annonce.</p>
                 }
               </div>
             </section>
@@ -403,8 +543,21 @@
                 </div>
                 <div class="announcement-card__meta">
                   <span>⌖ {{ annonce.adresse }}</span>
-                  <span>◷ {{ dateCourte(annonce.dateExpiration) }}</span>
+                  <span>
+                    ◷ {{ dateCourte(annonce.dateExpiration) }}
+                    <i class="risk-chip" [attr.data-level]="niveauUrgenceTemps(annonce.dateExpiration)">
+                      {{ tempsRestant(annonce.dateExpiration) }}
+                    </i>
+                  </span>
                 </div>
+                @if (estAuteur(annonce) || utilisateur()?.role === 'ADMIN') {
+                  <div class="announcement-card__actions">
+                    @if (estAuteur(annonce)) {
+                      <button class="action-btn" type="button" (click)="ouvrirEditionAnnonce(annonce)">✎ Modifier</button>
+                    }
+                    <button class="action-btn action-btn--danger" type="button" (click)="annulerAnnonce(annonce)">✕ Supprimer</button>
+                  </div>
+                }
                 <footer>
                   <span class="person-chip">
                     <i>{{ initiales(annonce.auteur) }}</i>
@@ -467,6 +620,16 @@
                       <span>Distance <b>{{ suggestion.distanceKm }} km</b></span>
                       <span>Quantité <b>{{ pourcentage(suggestion.criteres["quantite"]) }}</b></span>
                       <span>Urgence <b>{{ pourcentage(suggestion.criteres["urgence"]) }}</b></span>
+                    </div>
+                    <div class="matching-explanation">
+                      <p>
+                        {{ explicationMatching(suggestion).categorie }} ·
+                        {{ explicationMatching(suggestion).distance }} ·
+                        {{ explicationMatching(suggestion).quantite }}
+                      </p>
+                      <span class="risk-chip" [attr.data-level]="explicationMatching(suggestion).niveau">
+                        {{ explicationMatching(suggestion).recommandation }}
+                      </span>
                     </div>
                     <button class="button button--primary" type="button" (click)="accepterSuggestion(suggestion)">
                       Accepter le matching
@@ -646,7 +809,7 @@
               <article class="panel ai-card">
                 <div class="panel__header">
                   <div>
-                    <span class="eyebrow">IA d’optimisation</span>
+                    <span class="eyebrow">IA d'optimisation</span>
                     <h2>Ordre des collectes</h2>
                   </div>
                   <span class="ai-badge">45 · 35 · 20</span>
@@ -974,23 +1137,47 @@
   </div>
 
   @if (formulaireAnnonceOuvert()) {
-    <div class="modal-backdrop" (click)="formulaireAnnonceOuvert.set(false)"></div>
-    <form class="modal modal--wide" (ngSubmit)="creerAnnonce()">
-      <button class="modal__close" type="button" (click)="formulaireAnnonceOuvert.set(false)">×</button>
-      <span class="eyebrow">Nouvelle {{ utilisateur()?.role === "FOURNISSEUR" ? "offre" : "demande" }}</span>
-      <h2>Publier une annonce</h2>
+    <div class="modal-backdrop" (click)="fermerFormulaireAnnonce()"></div>
+    <form class="modal modal--wide" (ngSubmit)="annonceEnEdition() ? modifierAnnonce() : creerAnnonce()">
+      <button class="modal__close" type="button" (click)="fermerFormulaireAnnonce()">×</button>
+      <span class="eyebrow">
+        {{ annonceEnEdition() ? "Modifier l'annonce" : "Nouvelle " + (utilisateur()?.role === "FOURNISSEUR" ? "offre" : "demande") }}
+      </span>
+      <h2>{{ annonceEnEdition() ? "Modifier l'annonce" : "Publier une annonce" }}</h2>
       <div class="form-grid">
         <label class="form-grid__wide">
           Titre
-          <input name="titre" [(ngModel)]="annonceForm.titre" required maxlength="180" />
+          <input
+            name="titre"
+            [ngModel]="annonceForm.titre"
+            (ngModelChange)="annonceForm.titre = $event; onAnnonceTexteChange()"
+            required
+            maxlength="180"
+          />
         </label>
         <label class="form-grid__wide">
           Description
-          <textarea name="description" [(ngModel)]="annonceForm.description" required></textarea>
+          <textarea
+            name="description"
+            [ngModel]="annonceForm.description"
+            (ngModelChange)="annonceForm.description = $event; onAnnonceTexteChange()"
+            required
+          ></textarea>
         </label>
+        @if (suggestionCategorieIA(); as suggestion) {
+          <div class="form-grid__wide ai-suggestion-chip">
+            <span>
+              💡 Suggestion IA :
+              {{ suggestion.categorie?.nom || suggestion.typeProduit }}
+            </span>
+            @if (suggestion.categorie) {
+              <button type="button" (click)="appliquerSuggestionCategorie()">Appliquer</button>
+            }
+          </div>
+        }
         <label>
-          Catégorie
-          <select name="categorie" [(ngModel)]="annonceForm.categorieDonation" required>
+          Catégorie {{ annonceEnEdition() ? "(non modifiable)" : "" }}
+          <select name="categorie" [(ngModel)]="annonceForm.categorieDonation" [disabled]="!!annonceEnEdition()" required>
             @for (categorie of categories(); track categorie._id) {
               <option [value]="categorie._id">{{ categorie.nom }}</option>
             }
@@ -1029,13 +1216,15 @@
           <input name="longitude" type="number" step="0.0001" [(ngModel)]="annonceForm.longitude" required />
         </label>
         <label class="form-grid__wide">
-          Date d’expiration
+          Date d'expiration
           <input name="expiration" type="datetime-local" [(ngModel)]="annonceForm.dateExpiration" required />
         </label>
       </div>
       <footer class="modal__footer">
-        <button class="button" type="button" (click)="formulaireAnnonceOuvert.set(false)">Annuler</button>
-        <button class="button button--primary" type="submit">Publier</button>
+        <button class="button" type="button" (click)="fermerFormulaireAnnonce()">Annuler</button>
+        <button class="button button--primary" type="submit">
+          {{ annonceEnEdition() ? "Enregistrer les modifications" : "Publier" }}
+        </button>
       </footer>
     </form>
   }
@@ -1101,7 +1290,7 @@
             <input [ngModel]="vehicule()" (ngModelChange)="vehicule.set($event)" placeholder="Fourgon 12" />
           </label>
           <button class="button button--primary button--wide" type="button" [disabled]="!transporteurSelectionne()" (click)="assigner()">
-            Confirmer l’assignation
+            Confirmer l'assignation
           </button>
         </section>
       }

@@ -242,6 +242,7 @@ interface CompteDemo {
 export class App implements OnInit, OnDestroy {
   private readonly http = inject(HttpClient);
   private map?: L.Map;
+  private suggestionTimeout?: ReturnType<typeof setTimeout>;
   private markers?: L.LayerGroup;
   private mapElement?: HTMLDivElement;
 
@@ -279,13 +280,33 @@ export class App implements OnInit, OnDestroy {
   ];
 
   protected readonly section = signal<Section>('overview');
+  protected readonly vueAuth = signal<'connexion' | 'inscription'>('connexion');
   protected readonly email = signal('admin@rescuefood.demo');
   protected readonly motDePasse = signal('Demo1234!');
   protected readonly utilisateur = signal<Utilisateur | null>(null);
   protected readonly chargement = signal(false);
   protected readonly chargementConnexion = signal(false);
+  protected readonly chargementInscription = signal(false);
+  protected readonly inscriptionSucces = signal('');
   protected readonly erreur = signal('');
   protected readonly succes = signal('');
+
+  protected readonly registerForm = {
+    nom: '',
+    prenom: '',
+    email: '',
+    motDePasse: '',
+    telephone: '',
+    role: 'FOURNISSEUR',
+    adresse: ''
+  };
+
+  protected readonly rolesInscription = [
+    { value: 'FOURNISSEUR', label: 'Fournisseur', hint: 'Surplus à donner' },
+    { value: 'ONG', label: 'Association', hint: 'Besoin de dons' },
+    { value: 'TRANSPORTEUR', label: 'Transporteur', hint: 'Livraisons' },
+    { value: 'CITOYEN', label: 'Citoyen', hint: 'Consultation' }
+  ];
 
   protected readonly categories = signal<Categorie[]>([]);
   protected readonly annonces = signal<Annonce[]>([]);
@@ -299,6 +320,7 @@ export class App implements OnInit, OnDestroy {
   protected readonly filtreAnnonce = signal<'TOUS' | 'OFFRE' | 'DEMANDE'>('TOUS');
   protected readonly rechercheAnnonce = signal('');
   protected readonly formulaireAnnonceOuvert = signal(false);
+  protected readonly annonceEnEdition = signal<Annonce | null>(null);
   protected readonly annonceForm = {
     titre: '',
     description: '',
@@ -371,14 +393,46 @@ export class App implements OnInit, OnDestroy {
 
   protected readonly annoncesFiltrees = computed(() => {
     const filtre = this.filtreAnnonce();
+    const categorie = this.filtreCategorie();
     const recherche = this.rechercheAnnonce().trim().toLowerCase();
-    return this.annonces().filter((annonce) => {
+    const tri = this.triAnnonce();
+
+    let resultat = this.annonces().filter((annonce) => {
       const typeOk = filtre === 'TOUS' || annonce.type === filtre;
+      const categorieOk =
+        categorie === 'TOUS' || annonce.categorieDonation?._id === categorie;
       const texte =
         `${annonce.titre} ${annonce.description} ${annonce.auteur?.nom} ${annonce.categorieDonation?.nom}`.toLowerCase();
-      return typeOk && (!recherche || texte.includes(recherche));
+      return typeOk && categorieOk && (!recherche || texte.includes(recherche));
     });
+
+    const niveaux: Record<string, number> = { ELEVEE: 3, MOYENNE: 2, FAIBLE: 1 };
+
+    if (tri === 'URGENCE') {
+      resultat = [...resultat].sort(
+        (a, b) => (niveaux[b.urgence] || 0) - (niveaux[a.urgence] || 0)
+      );
+    } else if (tri === 'EXPIRATION') {
+      resultat = [...resultat].sort(
+        (a, b) =>
+          new Date(a.dateExpiration).getTime() -
+          new Date(b.dateExpiration).getTime()
+      );
+    } else {
+      resultat = [...resultat].sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+    }
+
+    return resultat;
   });
+  protected readonly filtreCategorie = signal('TOUS');
+  protected readonly triAnnonce = signal<'RECENT' | 'URGENCE' | 'EXPIRATION'>('RECENT');
+  protected readonly suggestionCategorieIA = signal<{
+  typeProduit: string;
+  categorie: Categorie | null;
+} | null>(null);
 
   protected readonly collectesFiltrees = computed(() => {
     const statut = this.filtreStatut();
@@ -516,6 +570,43 @@ export class App implements OnInit, OnDestroy {
       });
   }
 
+  protected basculerVersInscription(): void {
+    this.effacerMessages();
+    this.inscriptionSucces.set('');
+    this.vueAuth.set('inscription');
+  }
+
+  protected basculerVersConnexion(): void {
+    this.effacerMessages();
+    this.inscriptionSucces.set('');
+    this.vueAuth.set('connexion');
+  }
+
+  protected inscrire(): void {
+    this.chargementInscription.set(true);
+    this.effacerMessages();
+    this.http
+      .post<{ message: string }>('/api/auth/register', {
+        nom: this.registerForm.nom,
+        prenom: this.registerForm.prenom,
+        email: this.registerForm.email,
+        motDePasse: this.registerForm.motDePasse,
+        telephone: this.registerForm.telephone,
+        role: this.registerForm.role,
+        adresse: this.registerForm.adresse
+      })
+      .subscribe({
+        next: ({ message }) => {
+          this.chargementInscription.set(false);
+          this.inscriptionSucces.set(message);
+        },
+        error: (error) => {
+          this.chargementInscription.set(false);
+          this.erreur.set(error.error?.message || 'Inscription impossible.');
+        }
+      });
+  }
+
   protected deconnexion(appelerApi = true): void {
     if (appelerApi && this.utilisateur()) {
       this.http
@@ -579,6 +670,8 @@ export class App implements OnInit, OnDestroy {
     const expiration = new Date();
     expiration.setDate(expiration.getDate() + 2);
     this.annonceForm.dateExpiration = expiration.toISOString().slice(0, 16);
+    this.annonceEnEdition.set(null);
+    this.suggestionCategorieIA.set(null);
     this.formulaireAnnonceOuvert.set(true);
   }
 
@@ -630,6 +723,69 @@ export class App implements OnInit, OnDestroy {
         },
         error: (error) => this.signaler(error, 'Annulation impossible.')
       });
+  }
+
+  protected estAuteur(annonce: Annonce): boolean {
+    const userId = this.utilisateur()?.id || this.utilisateur()?._id;
+    const auteurId = annonce.auteur?.id || annonce.auteur?._id;
+    return !!(userId && auteurId && userId === auteurId);
+  }
+
+  protected ouvrirEditionAnnonce(annonce: Annonce): void {
+    this.annonceEnEdition.set(annonce);
+    this.annonceForm.titre = annonce.titre;
+    this.annonceForm.description = annonce.description;
+    this.annonceForm.categorieDonation = annonce.categorieDonation._id;
+    this.annonceForm.quantiteEstimee = annonce.quantiteEstimee;
+    this.annonceForm.unite = annonce.unite;
+    this.annonceForm.urgence = annonce.urgence;
+    this.annonceForm.adresse = annonce.adresse;
+    this.annonceForm.latitude = annonce.localisation?.latitude ?? 36.8065;
+    this.annonceForm.longitude = annonce.localisation?.longitude ?? 10.1815;
+    this.annonceForm.dateExpiration = new Date(annonce.dateExpiration)
+      .toISOString()
+      .slice(0, 16);
+    this.suggestionCategorieIA.set(null);
+    this.formulaireAnnonceOuvert.set(true);
+  }
+
+  protected modifierAnnonce(): void {
+    const annonce = this.annonceEnEdition();
+    if (!annonce) return;
+    this.http
+      .patch(
+        `/api/annonces/${annonce._id}`,
+        {
+          titre: this.annonceForm.titre,
+          description: this.annonceForm.description,
+          quantiteEstimee: Number(this.annonceForm.quantiteEstimee),
+          unite: this.annonceForm.unite,
+          urgence: this.annonceForm.urgence,
+          adresse: this.annonceForm.adresse,
+          localisation: {
+            latitude: Number(this.annonceForm.latitude),
+            longitude: Number(this.annonceForm.longitude)
+          },
+          dateExpiration: new Date(this.annonceForm.dateExpiration).toISOString()
+        },
+        { headers: this.entetes() }
+      )
+      .subscribe({
+        next: () => {
+          this.fermerFormulaireAnnonce();
+          this.notifier('Annonce modifiée avec succès.');
+          this.chargerDonneesPubliques();
+          this.chargerMesAnnonces();
+          this.chargerMatching();
+        },
+        error: (error) => this.signaler(error, 'Modification impossible.')
+      });
+  }
+
+  protected fermerFormulaireAnnonce(): void {
+    this.annonceEnEdition.set(null);
+    this.suggestionCategorieIA.set(null);
+    this.formulaireAnnonceOuvert.set(false);
   }
 
   protected accepterSuggestion(suggestion: Suggestion): void {
@@ -934,6 +1090,102 @@ export class App implements OnInit, OnDestroy {
 
   protected pourcentage(score: number): string {
     return `${Math.round(score * 100)}%`;
+  }
+
+  protected tempsRestant(dateExpiration: string): string {
+    const diffMs = new Date(dateExpiration).getTime() - Date.now();
+    if (diffMs <= 0) return 'Expirée';
+    const heures = Math.floor(diffMs / (1000 * 60 * 60));
+    if (heures < 1) {
+      const minutes = Math.floor(diffMs / (1000 * 60));
+      return `${minutes} min`;
+    }
+    if (heures < 24) return `${heures} h`;
+    return `${Math.floor(heures / 24)} j`;
+  }
+
+  protected niveauUrgenceTemps(dateExpiration: string): 'FAIBLE' | 'ATTENTION' | 'CRITIQUE' {
+    const heures = (new Date(dateExpiration).getTime() - Date.now()) / (1000 * 60 * 60);
+    if (heures <= 6) return 'CRITIQUE';
+    if (heures <= 24) return 'ATTENTION';
+    return 'FAIBLE';
+  }
+
+  protected explicationMatching(suggestion: Suggestion): {
+    categorie: string;
+    distance: string;
+    quantite: string;
+    recommandation: string;
+    niveau: 'FAIBLE' | 'ATTENTION' | 'CRITIQUE';
+  } {
+    const { criteres, distanceKm, score } = suggestion;
+
+    const categorie =
+      criteres['categorie'] === 1
+        ? 'Même catégorie alimentaire'
+        : 'Catégories différentes';
+
+    const distance =
+      distanceKm < 5
+        ? 'Très proche — collecte facile'
+        : distanceKm < 20
+        ? 'Distance raisonnable'
+        : 'Distance importante';
+
+    const quantite =
+      criteres['quantite'] >= 0.8
+        ? 'Quantités très proches'
+        : criteres['quantite'] >= 0.5
+        ? 'Quantités compatibles'
+        : 'Écart de quantité important';
+
+    let recommandation: string;
+    let niveau: 'FAIBLE' | 'ATTENTION' | 'CRITIQUE';
+
+    if (score > 0.7) {
+      recommandation = 'Excellent matching — fortement recommandé';
+      niveau = 'FAIBLE';
+    } else if (score > 0.5) {
+      recommandation = 'Bon matching — recommandé';
+      niveau = 'ATTENTION';
+    } else {
+      recommandation = 'Matching possible — à évaluer';
+      niveau = 'CRITIQUE';
+    }
+
+    return { categorie, distance, quantite, recommandation, niveau };
+  }
+
+  protected onAnnonceTexteChange(): void {
+    this.suggestionCategorieIA.set(null);
+    clearTimeout(this.suggestionTimeout);
+    this.suggestionTimeout = setTimeout(() => this.suggererCategorieIA(), 600);
+  }
+
+  private suggererCategorieIA(): void {
+    const titre = this.annonceForm.titre.trim();
+    if (titre.length < 3) return;
+
+    this.http
+      .get<{ suggestion: { typeProduit: string; categorie: Categorie | null } }>(
+        '/api/annonces/suggestion-categorie',
+        {
+          headers: this.entetes(),
+          params: { titre, description: this.annonceForm.description || '' }
+        }
+      )
+      .subscribe({
+        next: ({ suggestion }) => this.suggestionCategorieIA.set(suggestion),
+        error: () => this.suggestionCategorieIA.set(null)
+      });
+  }
+
+  protected appliquerSuggestionCategorie(): void {
+    const suggestion = this.suggestionCategorieIA();
+    if (suggestion?.categorie?._id) {
+      this.annonceForm.categorieDonation = suggestion.categorie._id;
+      this.suggestionCategorieIA.set(null);
+    }
   }
 
   protected statutsActionnables(collecte: Collecte): string[] {
