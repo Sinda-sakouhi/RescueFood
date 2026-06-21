@@ -23,8 +23,7 @@ async function startServer() {
     //   );
     // }
 
-    // Connexion MongoDB désactivée pour le développement
-    // await connectDB();
+    await connectDB();
 
     app.listen(port, () => {
       console.log(`✅ RescueFood API disponible sur http://localhost:${port}`);

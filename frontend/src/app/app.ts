@@ -19,6 +19,7 @@ type Section =
   | 'matching'
   | 'messages'
   | 'logistique'
+  | 'inventaire'
   | 'admin'
   | 'profile'
   | 'diagnostic';
@@ -45,6 +46,7 @@ interface Utilisateur {
 interface Categorie {
   _id: string;
   nom: string;
+  description?: string;
   typeProduit: string;
   prioriteRedistribution: string;
   dureeConservationEstimee: number;
@@ -117,8 +119,24 @@ interface Partie {
 interface Donation {
   _id: string;
   titre: string;
+  description?: string;
+  fournisseur?: Utilisateur;
+  beneficiaire?: Utilisateur | null;
+  categorieDonation?: Categorie;
+  compositionLot?: string;
+  quantiteEstimee?: number;
+  unite?: string;
   poidsTotalKg: number;
+  images?: string[];
+  temperatureStockage?: number | null;
+  conditionsStockage?: string;
+  statut?: string;
   urgence: string;
+  dateDisponibilite?: string;
+  dateLimiteCollecte?: string;
+  adresseCollecte?: string;
+  localisationCollecte?: { latitude: number; longitude: number };
+  createdAt?: string;
 }
 
 interface Collecte {
@@ -352,6 +370,40 @@ export class App implements OnInit, OnDestroy {
     this.dashboardLogistiqueVide()
   );
 
+  protected readonly donations = signal<Donation[]>([]);
+  protected readonly filtreDonationStatut = signal('TOUS');
+  protected readonly filtreDonationUrgence = signal('TOUS');
+  protected readonly formulaireDonationOuvert = signal(false);
+  protected readonly donationEnEdition = signal<Donation | null>(null);
+  protected readonly donationForm = {
+    titre: '',
+    description: '',
+    categorieDonation: '',
+    compositionLot: '',
+    quantiteEstimee: 10,
+    unite: 'KG',
+    poidsTotalKg: 0,
+    imageUrl: '',
+    temperatureStockage: '',
+    conditionsStockage: '',
+    urgence: 'MOYENNE',
+    dateDisponibilite: '',
+    dateLimiteCollecte: '',
+    adresseCollecte: '',
+    latitude: 36.8065,
+    longitude: 10.1815
+  };
+
+  protected readonly formulaireCategorieOuvert = signal(false);
+  protected readonly categorieEnEdition = signal<Categorie | null>(null);
+  protected readonly categorieForm = {
+    nom: '',
+    description: '',
+    typeProduit: 'FRUITS_LEGUMES',
+    prioriteRedistribution: 'MOYENNE',
+    dureeConservationEstimee: 7
+  };
+
   protected readonly dashboardAdmin = signal<DashboardAdmin | null>(null);
   protected readonly utilisateurs = signal<Utilisateur[]>([]);
   protected readonly editionUtilisateur = signal<Utilisateur | null>(null);
@@ -382,6 +434,9 @@ export class App implements OnInit, OnDestroy {
     }
     if (['ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'].includes(role || '')) {
       items.push({ id: 'logistique', label: 'Logistique', icon: '↗' });
+    }
+    if (['ADMIN', 'FOURNISSEUR', 'ONG', 'TRANSPORTEUR'].includes(role || '')) {
+      items.push({ id: 'inventaire', label: 'Inventaire', icon: '▦' });
     }
     if (role === 'ADMIN') {
       items.push({ id: 'admin', label: 'Administration', icon: '⚙' });
@@ -433,6 +488,16 @@ export class App implements OnInit, OnDestroy {
   typeProduit: string;
   categorie: Categorie | null;
 } | null>(null);
+
+  protected readonly donationsFiltrees = computed(() => {
+    const statut = this.filtreDonationStatut();
+    const urgence = this.filtreDonationUrgence();
+    return this.donations().filter((d) => {
+      const statutOk = statut === 'TOUS' || d.statut === statut;
+      const urgenceOk = urgence === 'TOUS' || d.urgence === urgence;
+      return statutOk && urgenceOk;
+    });
+  });
 
   protected readonly collectesFiltrees = computed(() => {
     const statut = this.filtreStatut();
@@ -504,7 +569,7 @@ export class App implements OnInit, OnDestroy {
       {
         nom: 'Inventaire / donations',
         disponible: true,
-        detail: 'CRUD /api/donations disponible, interface dédiée à connecter'
+        detail: `${this.donations().length} don(s) chargé(s), CRUD complet`
       }
     ];
   });
@@ -637,6 +702,7 @@ export class App implements OnInit, OnDestroy {
     this.chargement.set(true);
     this.chargerDonneesPubliques();
     this.chargerConversations();
+    this.chargerInventaire();
     const role = this.utilisateur()?.role;
 
     if (role === 'FOURNISSEUR' || role === 'ONG') {
@@ -1209,10 +1275,247 @@ export class App implements OnInit, OnDestroy {
     );
   }
 
+  protected ouvrirFormulaireDonation(donation?: Donation): void {
+    if (donation) {
+      this.donationEnEdition.set(donation);
+      this.donationForm.titre = donation.titre;
+      this.donationForm.description = donation.description || '';
+      this.donationForm.categorieDonation = donation.categorieDonation?._id || '';
+      this.donationForm.compositionLot = donation.compositionLot || '';
+      this.donationForm.quantiteEstimee = donation.quantiteEstimee || 1;
+      this.donationForm.unite = donation.unite || 'KG';
+      this.donationForm.poidsTotalKg = donation.poidsTotalKg;
+      this.donationForm.imageUrl = donation.images?.[0] || '';
+      this.donationForm.temperatureStockage = donation.temperatureStockage?.toString() || '';
+      this.donationForm.conditionsStockage = donation.conditionsStockage || '';
+      this.donationForm.urgence = donation.urgence;
+      this.donationForm.dateDisponibilite = donation.dateDisponibilite
+        ? new Date(donation.dateDisponibilite).toISOString().slice(0, 16)
+        : '';
+      this.donationForm.dateLimiteCollecte = donation.dateLimiteCollecte
+        ? new Date(donation.dateLimiteCollecte).toISOString().slice(0, 16)
+        : '';
+      this.donationForm.adresseCollecte = donation.adresseCollecte || '';
+      this.donationForm.latitude = donation.localisationCollecte?.latitude ?? 36.8065;
+      this.donationForm.longitude = donation.localisationCollecte?.longitude ?? 10.1815;
+    } else {
+      const u = this.utilisateur();
+      this.donationEnEdition.set(null);
+      this.donationForm.titre = '';
+      this.donationForm.description = '';
+      this.donationForm.categorieDonation = this.categories()[0]?._id || '';
+      this.donationForm.compositionLot = '';
+      this.donationForm.quantiteEstimee = 10;
+      this.donationForm.unite = 'KG';
+      this.donationForm.poidsTotalKg = 0;
+      this.donationForm.imageUrl = '';
+      this.donationForm.temperatureStockage = '';
+      this.donationForm.conditionsStockage = '';
+      this.donationForm.urgence = 'MOYENNE';
+      const now = new Date();
+      now.setHours(now.getHours() + 1);
+      this.donationForm.dateDisponibilite = now.toISOString().slice(0, 16);
+      const limite = new Date(now);
+      limite.setDate(limite.getDate() + 2);
+      this.donationForm.dateLimiteCollecte = limite.toISOString().slice(0, 16);
+      this.donationForm.adresseCollecte = u?.adresse || '';
+      this.donationForm.latitude = u?.localisation?.latitude ?? 36.8065;
+      this.donationForm.longitude = u?.localisation?.longitude ?? 10.1815;
+    }
+    this.formulaireDonationOuvert.set(true);
+  }
+
+  protected fermerFormulaireDonation(): void {
+    this.donationEnEdition.set(null);
+    this.formulaireDonationOuvert.set(false);
+  }
+
+  protected enregistrerDonation(): void {
+    const edition = this.donationEnEdition();
+    const corps = {
+      titre: this.donationForm.titre,
+      description: this.donationForm.description,
+      categorieDonation: this.donationForm.categorieDonation,
+      compositionLot: this.donationForm.compositionLot,
+      quantiteEstimee: Number(this.donationForm.quantiteEstimee),
+      unite: this.donationForm.unite,
+      poidsTotalKg: Number(this.donationForm.poidsTotalKg),
+      images: [this.donationForm.imageUrl].filter(Boolean),
+      temperatureStockage: this.donationForm.temperatureStockage
+        ? Number(this.donationForm.temperatureStockage)
+        : null,
+      conditionsStockage: this.donationForm.conditionsStockage,
+      urgence: this.donationForm.urgence,
+      dateDisponibilite: new Date(this.donationForm.dateDisponibilite).toISOString(),
+      dateLimiteCollecte: new Date(this.donationForm.dateLimiteCollecte).toISOString(),
+      adresseCollecte: this.donationForm.adresseCollecte,
+      localisationCollecte: {
+        latitude: Number(this.donationForm.latitude),
+        longitude: Number(this.donationForm.longitude)
+      }
+    };
+
+    const requete = edition
+      ? this.http.put(`/api/donations/${edition._id}`, corps, { headers: this.entetes() })
+      : this.http.post('/api/donations', corps, { headers: this.entetes() });
+
+    requete.subscribe({
+      next: () => {
+        this.fermerFormulaireDonation();
+        this.notifier(edition ? 'Don modifié avec succès.' : 'Don créé avec succès.');
+        this.chargerInventaire();
+      },
+      error: (error) => this.signaler(error, 'Enregistrement impossible.')
+    });
+  }
+
+  protected supprimerDonation(donation: Donation): void {
+    if (!confirm(`Supprimer le don "${donation.titre}" ?`)) return;
+    this.http
+      .delete(`/api/donations/${donation._id}`, { headers: this.entetes() })
+      .subscribe({
+        next: () => {
+          this.notifier('Don supprimé.');
+          this.chargerInventaire();
+        },
+        error: (error) => this.signaler(error, 'Suppression impossible.')
+      });
+  }
+
+  protected changerStatutDonation(donation: Donation, statut: string): void {
+    this.http
+      .patch(
+        `/api/donations/${donation._id}/statut`,
+        { statut },
+        { headers: this.entetes() }
+      )
+      .subscribe({
+        next: () => {
+          this.notifier(`Statut mis à jour : ${this.libelleStatutDon(statut)}.`);
+          this.chargerInventaire();
+        },
+        error: (error) => this.signaler(error, 'Changement de statut impossible.')
+      });
+  }
+
+  protected peutModifierDonation(donation: Donation): boolean {
+    const role = this.utilisateur()?.role;
+    if (role === 'ADMIN') return true;
+    if (role === 'FOURNISSEUR') {
+      const userId = this.utilisateur()?.id || this.utilisateur()?._id;
+      const fId = donation.fournisseur?.id || donation.fournisseur?._id;
+      return userId === fId;
+    }
+    return false;
+  }
+
+  protected peutSupprimerDonation(donation: Donation): boolean {
+    if (['EN_COLLECTE', 'LIVRE'].includes(donation.statut || '')) return false;
+    return this.peutModifierDonation(donation);
+  }
+
+  protected prochainStatutsDon(donation: Donation): string[] {
+    const transitions: Record<string, string[]> = {
+      CREE: ['EN_ATTENTE_VALIDATION', 'ANNULE'],
+      EN_ATTENTE_VALIDATION: ['VALIDE', 'ANNULE'],
+      VALIDE: ['RESERVE', 'ANNULE'],
+      RESERVE: ['EN_COLLECTE', 'ANNULE'],
+      EN_COLLECTE: ['LIVRE'],
+      LIVRE: [],
+      ANNULE: []
+    };
+    return transitions[donation.statut || 'CREE'] || [];
+  }
+
+  protected libelleStatutDon(statut: string): string {
+    const libelles: Record<string, string> = {
+      CREE: 'Créé',
+      EN_ATTENTE_VALIDATION: 'En attente',
+      VALIDE: 'Validé',
+      RESERVE: 'Réservé',
+      EN_COLLECTE: 'En collecte',
+      LIVRE: 'Livré',
+      ANNULE: 'Annulé'
+    };
+    return libelles[statut] || statut;
+  }
+
+  protected ouvrirFormulaireCategorie(categorie?: Categorie): void {
+    if (categorie) {
+      this.categorieEnEdition.set(categorie);
+      this.categorieForm.nom = categorie.nom;
+      this.categorieForm.description = categorie.description || '';
+      this.categorieForm.typeProduit = categorie.typeProduit;
+      this.categorieForm.prioriteRedistribution = categorie.prioriteRedistribution;
+      this.categorieForm.dureeConservationEstimee = categorie.dureeConservationEstimee;
+    } else {
+      this.categorieEnEdition.set(null);
+      this.categorieForm.nom = '';
+      this.categorieForm.description = '';
+      this.categorieForm.typeProduit = 'FRUITS_LEGUMES';
+      this.categorieForm.prioriteRedistribution = 'MOYENNE';
+      this.categorieForm.dureeConservationEstimee = 7;
+    }
+    this.formulaireCategorieOuvert.set(true);
+  }
+
+  protected fermerFormulaireCategorie(): void {
+    this.categorieEnEdition.set(null);
+    this.formulaireCategorieOuvert.set(false);
+  }
+
+  protected enregistrerCategorie(): void {
+    const edition = this.categorieEnEdition();
+    const corps = {
+      nom: this.categorieForm.nom,
+      description: this.categorieForm.description,
+      typeProduit: this.categorieForm.typeProduit,
+      prioriteRedistribution: this.categorieForm.prioriteRedistribution,
+      dureeConservationEstimee: Number(this.categorieForm.dureeConservationEstimee)
+    };
+
+    const requete = edition
+      ? this.http.put(`/api/categories/${edition._id}`, corps, { headers: this.entetes() })
+      : this.http.post('/api/categories', corps, { headers: this.entetes() });
+
+    requete.subscribe({
+      next: () => {
+        this.fermerFormulaireCategorie();
+        this.notifier(edition ? 'Catégorie modifiée.' : 'Catégorie créée.');
+        this.chargerDonneesPubliques();
+      },
+      error: (error) => this.signaler(error, 'Enregistrement impossible.')
+    });
+  }
+
+  protected supprimerCategorie(categorie: Categorie): void {
+    if (!confirm(`Supprimer la catégorie "${categorie.nom}" ?`)) return;
+    this.http
+      .delete(`/api/categories/${categorie._id}`, { headers: this.entetes() })
+      .subscribe({
+        next: () => {
+          this.notifier('Catégorie supprimée.');
+          this.chargerDonneesPubliques();
+        },
+        error: (error) => this.signaler(error, 'Suppression impossible.')
+      });
+  }
+
   private initialiserUtilisateur(user: Utilisateur): void {
     this.utilisateur.set(user);
     this.profilTelephone.set(user.telephone || '');
     this.profilAdresse.set(user.adresse || '');
+  }
+
+  private chargerInventaire(): void {
+    this.http
+      .get<{ donations: Donation[] }>('/api/donations?limit=100', {
+        headers: this.entetes()
+      })
+      .subscribe({
+        next: ({ donations }) => this.donations.set(donations),
+        error: (error) => this.signaler(error, 'Inventaire indisponible.')
+      });
   }
 
   private chargerDonneesPubliques(): void {

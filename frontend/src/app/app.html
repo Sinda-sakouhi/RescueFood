@@ -290,6 +290,10 @@
               <h1>Mon profil</h1>
               <p>Informations de contact et localisation.</p>
             }
+            @case ("inventaire") {
+              <h1>Inventaire</h1>
+              <p>Gestion des dons alimentaires et des catégories.</p>
+            }
             @case ("diagnostic") {
               <h1>Diagnostic fonctionnel</h1>
               <p>Vérifiez ce qui est exposé et testable pour ce rôle.</p>
@@ -308,6 +312,16 @@
           @if (section() === "logistique") {
             <button class="button button--secondary" type="button" (click)="telechargerRapport()">
               ↓ Rapport PDF
+            </button>
+          }
+          @if (section() === "inventaire" && utilisateur()?.role === "FOURNISSEUR") {
+            <button class="button button--primary" type="button" (click)="ouvrirFormulaireDonation()">
+              + Nouveau don
+            </button>
+          }
+          @if (section() === "inventaire" && utilisateur()?.role === "ADMIN") {
+            <button class="button button--secondary" type="button" (click)="ouvrirFormulaireCategorie()">
+              + Catégorie
             </button>
           }
         </div>
@@ -988,6 +1002,131 @@
           </section>
         }
 
+        @case ("inventaire") {
+          @if (utilisateur()?.role === "ADMIN") {
+            <section class="panel">
+              <div class="panel__header">
+                <div>
+                  <span class="eyebrow">Administration</span>
+                  <h2>Catégories de produits</h2>
+                </div>
+                <button class="button button--primary" type="button" (click)="ouvrirFormulaireCategorie()">
+                  + Nouvelle catégorie
+                </button>
+              </div>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Nom</th>
+                      <th>Type</th>
+                      <th>Priorité</th>
+                      <th>Conservation (j)</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (cat of categories(); track cat._id) {
+                      <tr>
+                        <td><strong>{{ cat.nom }}</strong></td>
+                        <td><span class="badge">{{ cat.typeProduit }}</span></td>
+                        <td>
+                          <span class="badge badge--urgence-{{ cat.prioriteRedistribution }}">
+                            {{ cat.prioriteRedistribution }}
+                          </span>
+                        </td>
+                        <td>{{ cat.dureeConservationEstimee }} j</td>
+                        <td class="action-cell">
+                          <button class="button button--sm button--secondary" type="button" (click)="ouvrirFormulaireCategorie(cat)">Modifier</button>
+                          <button class="button button--sm button--danger" type="button" (click)="supprimerCategorie(cat)">Supprimer</button>
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          }
+
+          <section class="panel">
+            <div class="panel__header">
+              <div>
+                <span class="eyebrow">{{ utilisateur()?.role === "FOURNISSEUR" ? "Mes dons" : "Tous les dons" }}</span>
+                <h2>Inventaire alimentaire</h2>
+              </div>
+              @if (utilisateur()?.role === "FOURNISSEUR") {
+                <button class="button button--primary" type="button" (click)="ouvrirFormulaireDonation()">
+                  + Nouveau don
+                </button>
+              }
+            </div>
+
+            <div class="filter-row">
+              <select [ngModel]="filtreDonationStatut()" (ngModelChange)="filtreDonationStatut.set($event)" name="filtreDonationStatut">
+                @for (s of ["TOUS","CREE","EN_ATTENTE_VALIDATION","VALIDE","RESERVE","EN_COLLECTE","LIVRE","ANNULE"]; track s) {
+                  <option [value]="s">{{ s === "TOUS" ? "Tous les statuts" : libelleStatutDon(s) }}</option>
+                }
+              </select>
+              <select [ngModel]="filtreDonationUrgence()" (ngModelChange)="filtreDonationUrgence.set($event)" name="filtreDonationUrgence">
+                <option value="TOUS">Toutes urgences</option>
+                <option value="ELEVEE">Élevée</option>
+                <option value="MOYENNE">Moyenne</option>
+                <option value="FAIBLE">Faible</option>
+              </select>
+            </div>
+
+            @if (!donationsFiltrees().length) {
+              <p class="empty-hint">Aucun don trouvé pour ces filtres.</p>
+            }
+
+            <div class="donation-grid">
+              @for (don of donationsFiltrees(); track don._id) {
+                <article class="donation-card">
+                  @if (don.images?.[0]) {
+                    <img class="donation-card__img" [src]="don.images![0]" [alt]="don.titre" />
+                  }
+                  <div class="donation-card__header">
+                    <span class="badge badge--urgence-{{ don.urgence }}">{{ don.urgence }}</span>
+                    <span class="badge">{{ libelleStatutDon(don.statut || "CREE") }}</span>
+                  </div>
+                  <h3>{{ don.titre }}</h3>
+                  <p class="donation-card__meta">
+                    {{ don.poidsTotalKg }} kg · {{ don.unite || "" }} · {{ don.categorieDonation?.nom || "—" }}
+                  </p>
+                  @if (don.adresseCollecte) {
+                    <p class="donation-card__address">📍 {{ don.adresseCollecte }}</p>
+                  }
+                  @if (don.dateLimiteCollecte) {
+                    <p class="donation-card__deadline">Limite : {{ dateCourte(don.dateLimiteCollecte) }}</p>
+                  }
+                  @if (don.fournisseur) {
+                    <p class="donation-card__meta">Par : {{ don.fournisseur.prenom }} {{ don.fournisseur.nom }}</p>
+                  }
+                  <div class="donation-card__actions">
+                    @if (peutModifierDonation(don)) {
+                      <button class="button button--sm button--secondary" type="button" (click)="ouvrirFormulaireDonation(don)">
+                        Modifier
+                      </button>
+                    }
+                    @if (peutSupprimerDonation(don)) {
+                      <button class="button button--sm button--danger" type="button" (click)="supprimerDonation(don)">
+                        Supprimer
+                      </button>
+                    }
+                    @if (["ADMIN","ONG","TRANSPORTEUR"].includes(utilisateur()?.role || "")) {
+                      @for (statut of prochainStatutsDon(don); track statut) {
+                        <button class="button button--sm button--primary" type="button" (click)="changerStatutDonation(don, statut)">
+                          → {{ libelleStatutDon(statut) }}
+                        </button>
+                      }
+                    }
+                  </div>
+                </article>
+              }
+            </div>
+          </section>
+        }
+
         @case ("admin") {
           <section class="metric-grid admin-metrics">
             <article class="metric-card">
@@ -1346,6 +1485,140 @@
       </label>
       <footer class="modal__footer">
         <button class="button" type="button" (click)="editionUtilisateur.set(null)">Annuler</button>
+        <button class="button button--primary" type="submit">Enregistrer</button>
+      </footer>
+    </form>
+  }
+
+  @if (formulaireDonationOuvert()) {
+    <div class="modal-backdrop" (click)="fermerFormulaireDonation()"></div>
+    <form class="modal modal--large" (ngSubmit)="enregistrerDonation()">
+      <button class="modal__close" type="button" (click)="fermerFormulaireDonation()">×</button>
+      <span class="eyebrow">{{ donationEnEdition() ? "Modifier" : "Créer" }} un don</span>
+      <h2>{{ donationEnEdition() ? donationEnEdition()!.titre : "Nouveau don alimentaire" }}</h2>
+      <div class="form-grid">
+        <label class="form-grid__full">
+          Titre *
+          <input type="text" name="don_titre" [(ngModel)]="donationForm.titre" required />
+        </label>
+        <label class="form-grid__full">
+          Description
+          <textarea name="don_description" [(ngModel)]="donationForm.description" rows="2"></textarea>
+        </label>
+        <label>
+          Catégorie *
+          <select name="don_categorie" [(ngModel)]="donationForm.categorieDonation" required>
+            @for (cat of categories(); track cat._id) {
+              <option [value]="cat._id">{{ cat.nom }}</option>
+            }
+          </select>
+        </label>
+        <label>
+          Urgence
+          <select name="don_urgence" [(ngModel)]="donationForm.urgence">
+            <option value="FAIBLE">Faible</option>
+            <option value="MOYENNE">Moyenne</option>
+            <option value="ELEVEE">Élevée</option>
+          </select>
+        </label>
+        <label class="form-grid__full">
+          Composition du lot *
+          <input type="text" name="don_composition" [(ngModel)]="donationForm.compositionLot" required />
+        </label>
+        <label>
+          Unité *
+          <select name="don_unite" [(ngModel)]="donationForm.unite">
+            @for (u of ["KG","G","L","UNITE","PORTION"]; track u) {
+              <option [value]="u">{{ u }}</option>
+            }
+          </select>
+        </label>
+        <label>
+          Quantité estimée *
+          <input type="number" name="don_quantite" [(ngModel)]="donationForm.quantiteEstimee" min="0.01" required />
+        </label>
+        <label>
+          Poids total (kg) *
+          <input type="number" name="don_poids" [(ngModel)]="donationForm.poidsTotalKg" min="0" step="0.1" required />
+        </label>
+        <label class="form-grid__full">
+          URL de l'image *
+          <input type="text" name="don_image" [(ngModel)]="donationForm.imageUrl" placeholder="https://..." required />
+        </label>
+        <label>
+          Date de disponibilité *
+          <input type="datetime-local" name="don_dispo" [(ngModel)]="donationForm.dateDisponibilite" required />
+        </label>
+        <label>
+          Date limite de collecte *
+          <input type="datetime-local" name="don_limite" [(ngModel)]="donationForm.dateLimiteCollecte" required />
+        </label>
+        <label class="form-grid__full">
+          Adresse de collecte *
+          <input type="text" name="don_adresse" [(ngModel)]="donationForm.adresseCollecte" required />
+        </label>
+        <label>
+          Latitude
+          <input type="number" name="don_lat" [(ngModel)]="donationForm.latitude" step="0.0001" />
+        </label>
+        <label>
+          Longitude
+          <input type="number" name="don_lng" [(ngModel)]="donationForm.longitude" step="0.0001" />
+        </label>
+        <label>
+          Température stockage (°C)
+          <input type="number" name="don_temp" [(ngModel)]="donationForm.temperatureStockage" />
+        </label>
+        <label>
+          Conditions de stockage
+          <input type="text" name="don_conditions" [(ngModel)]="donationForm.conditionsStockage" />
+        </label>
+      </div>
+      <footer class="modal__footer">
+        <button class="button" type="button" (click)="fermerFormulaireDonation()">Annuler</button>
+        <button class="button button--primary" type="submit">
+          {{ donationEnEdition() ? "Enregistrer les modifications" : "Créer le don" }}
+        </button>
+      </footer>
+    </form>
+  }
+
+  @if (formulaireCategorieOuvert()) {
+    <div class="modal-backdrop" (click)="fermerFormulaireCategorie()"></div>
+    <form class="modal" (ngSubmit)="enregistrerCategorie()">
+      <button class="modal__close" type="button" (click)="fermerFormulaireCategorie()">×</button>
+      <span class="eyebrow">{{ categorieEnEdition() ? "Modifier" : "Créer" }} une catégorie</span>
+      <h2>{{ categorieEnEdition()?.nom || "Nouvelle catégorie" }}</h2>
+      <label>
+        Nom *
+        <input type="text" name="cat_nom" [(ngModel)]="categorieForm.nom" required />
+      </label>
+      <label>
+        Description *
+        <textarea name="cat_desc" [(ngModel)]="categorieForm.description" rows="2" required></textarea>
+      </label>
+      <label>
+        Type de produit *
+        <select name="cat_type" [(ngModel)]="categorieForm.typeProduit">
+          @for (t of ["FRUITS_LEGUMES","PAIN_VIENNOISERIE","PRODUITS_LAITIERS","PLATS_PREPARES","CONSERVES","BOISSONS","AUTRE"]; track t) {
+            <option [value]="t">{{ t }}</option>
+          }
+        </select>
+      </label>
+      <label>
+        Priorité de redistribution
+        <select name="cat_priorite" [(ngModel)]="categorieForm.prioriteRedistribution">
+          <option value="FAIBLE">Faible</option>
+          <option value="MOYENNE">Moyenne</option>
+          <option value="ELEVEE">Élevée</option>
+        </select>
+      </label>
+      <label>
+        Durée de conservation (jours) *
+        <input type="number" name="cat_duree" [(ngModel)]="categorieForm.dureeConservationEstimee" min="0" required />
+      </label>
+      <footer class="modal__footer">
+        <button class="button" type="button" (click)="fermerFormulaireCategorie()">Annuler</button>
         <button class="button button--primary" type="submit">Enregistrer</button>
       </footer>
     </form>
