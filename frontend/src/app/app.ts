@@ -394,6 +394,13 @@ export class App implements OnInit, OnDestroy {
     longitude: 10.1815
   };
 
+  protected readonly rechercheInventaire = signal('');
+  protected readonly filtreDonationCategorie = signal('TOUS');
+  protected readonly triDonation = signal<'DATE' | 'URGENCE' | 'POIDS' | 'EXPIRATION'>('DATE');
+  protected readonly donationSelectionnee = signal<Donation | null>(null);
+  protected readonly suggestionCategorieDon = signal<{ typeProduit: string; categorie: Categorie | null } | null>(null);
+  protected readonly urgenceAutoCalculee = signal(false);
+
   protected readonly formulaireCategorieOuvert = signal(false);
   protected readonly categorieEnEdition = signal<Categorie | null>(null);
   protected readonly categorieForm = {
@@ -492,11 +499,57 @@ export class App implements OnInit, OnDestroy {
   protected readonly donationsFiltrees = computed(() => {
     const statut = this.filtreDonationStatut();
     const urgence = this.filtreDonationUrgence();
-    return this.donations().filter((d) => {
+    const categorie = this.filtreDonationCategorie();
+    const recherche = this.rechercheInventaire().trim().toLowerCase();
+    const tri = this.triDonation();
+    const niveaux: Record<string, number> = { ELEVEE: 3, MOYENNE: 2, FAIBLE: 1 };
+
+    let result = this.donations().filter((d) => {
       const statutOk = statut === 'TOUS' || d.statut === statut;
       const urgenceOk = urgence === 'TOUS' || d.urgence === urgence;
-      return statutOk && urgenceOk;
+      const categorieOk = categorie === 'TOUS' || d.categorieDonation?._id === categorie;
+      const texte = `${d.titre} ${d.description || ''} ${d.adresseCollecte || ''} ${d.categorieDonation?.nom || ''}`.toLowerCase();
+      const rechercheOk = !recherche || texte.includes(recherche);
+      return statutOk && urgenceOk && categorieOk && rechercheOk;
     });
+
+    if (tri === 'URGENCE') {
+      result = [...result].sort((a, b) => (niveaux[b.urgence] || 0) - (niveaux[a.urgence] || 0));
+    } else if (tri === 'POIDS') {
+      result = [...result].sort((a, b) => b.poidsTotalKg - a.poidsTotalKg);
+    } else if (tri === 'EXPIRATION') {
+      result = [...result].sort((a, b) =>
+        new Date(a.dateLimiteCollecte || 0).getTime() - new Date(b.dateLimiteCollecte || 0).getTime()
+      );
+    } else {
+      result = [...result].sort((a, b) =>
+        new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+    }
+    return result;
+  });
+
+  protected readonly statsInventaire = computed(() => {
+    const dons = this.donations();
+    const parStatut: Record<string, number> = {};
+    let poidsTotal = 0;
+    let urgencesElevees = 0;
+
+    for (const d of dons) {
+      const s = d.statut || 'CREE';
+      parStatut[s] = (parStatut[s] || 0) + 1;
+      poidsTotal += d.poidsTotalKg || 0;
+      if (d.urgence === 'ELEVEE') urgencesElevees++;
+    }
+    const maxStatut = Math.max(1, ...Object.values(parStatut));
+    return {
+      total: dons.length,
+      parStatut,
+      poidsTotal: Math.round(poidsTotal * 10) / 10,
+      urgencesElevees,
+      maxStatut,
+      livres: parStatut['LIVRE'] || 0
+    };
   });
 
   protected readonly collectesFiltrees = computed(() => {
@@ -1275,6 +1328,116 @@ export class App implements OnInit, OnDestroy {
     );
   }
 
+  protected onTitreDonChange(): void {
+    this.suggestionCategorieDon.set(null);
+    clearTimeout(this.suggestionTimeout);
+    this.suggestionTimeout = setTimeout(() => {
+      const titre = this.donationForm.titre.trim();
+      if (titre.length < 3) return;
+      this.http
+        .get<{ suggestion: { typeProduit: string; categorie: Categorie | null } }>(
+          '/api/annonces/suggestion-categorie',
+          { params: { titre, description: this.donationForm.description || '' } }
+        )
+        .subscribe({
+          next: ({ suggestion }) => this.suggestionCategorieDon.set(suggestion),
+          error: () => this.suggestionCategorieDon.set(null)
+        });
+    }, 600);
+  }
+
+  protected appliquerSuggestionCategorieDon(): void {
+    const s = this.suggestionCategorieDon();
+    if (s?.categorie?._id) {
+      this.donationForm.categorieDonation = s.categorie._id;
+      this.suggestionCategorieDon.set(null);
+    }
+  }
+
+  protected onDateLimiteChange(): void {
+    const valeur = this.donationForm.dateLimiteCollecte;
+    if (!valeur) return;
+    const heures = (new Date(valeur).getTime() - Date.now()) / 3600000;
+    if (heures <= 24) {
+      this.donationForm.urgence = 'ELEVEE';
+    } else if (heures <= 72) {
+      this.donationForm.urgence = 'MOYENNE';
+    } else {
+      this.donationForm.urgence = 'FAIBLE';
+    }
+    this.urgenceAutoCalculee.set(true);
+  }
+
+  protected ouvrirDetailDonation(donation: Donation): void {
+    this.donationSelectionnee.set(donation);
+  }
+
+  protected fermerDetailDonation(): void {
+    this.donationSelectionnee.set(null);
+  }
+
+  protected niveauExpiration(don: Donation): 'CRITIQUE' | 'ATTENTION' | null {
+    if (!don.dateLimiteCollecte) return null;
+    if (['LIVRE', 'ANNULE'].includes(don.statut || '')) return null;
+    const heures = (new Date(don.dateLimiteCollecte).getTime() - Date.now()) / (1000 * 60 * 60);
+    if (heures <= 0) return 'CRITIQUE';
+    if (heures <= 24) return 'CRITIQUE';
+    if (heures <= 48) return 'ATTENTION';
+    return null;
+  }
+
+  protected readonly insightsIA = computed(() => {
+    const dons = this.donations();
+    if (!dons.length) return [];
+    const insights: Array<{ niveau: 'urgent' | 'warning' | 'info'; message: string }> = [];
+
+    const expirantBientot = dons.filter((d) => {
+      if (!d.dateLimiteCollecte || ['LIVRE', 'ANNULE'].includes(d.statut || '')) return false;
+      const h = (new Date(d.dateLimiteCollecte).getTime() - Date.now()) / 3600000;
+      return h > 0 && h <= 24;
+    });
+    if (expirantBientot.length)
+      insights.push({ niveau: 'urgent', message: `${expirantBientot.length} don(s) expirent dans moins de 24h — action urgente requise` });
+
+    const parCat: Record<string, { nom: string; count: number }> = {};
+    for (const d of dons) {
+      if (d.categorieDonation) {
+        const id = d.categorieDonation._id;
+        if (!parCat[id]) parCat[id] = { nom: d.categorieDonation.nom, count: 0 };
+        parCat[id].count++;
+      }
+    }
+    const topCat = Object.values(parCat).sort((a, b) => b.count - a.count)[0];
+    if (topCat) {
+      const pct = Math.round((topCat.count / dons.length) * 100);
+      insights.push({ niveau: 'info', message: `"${topCat.nom}" représente ${pct}% de l'inventaire — prioriser la redistribution` });
+    }
+
+    const livres = dons.filter((d) => d.statut === 'LIVRE').length;
+    const taux = Math.round((livres / dons.length) * 100);
+    insights.push({ niveau: taux >= 50 ? 'info' : 'warning', message: `Taux de livraison : ${taux}% (${livres}/${dons.length} dons livrés)` });
+
+    const enAttente = dons.filter((d) => d.statut === 'EN_ATTENTE_VALIDATION').length;
+    if (enAttente)
+      insights.push({ niveau: 'warning', message: `${enAttente} don(s) en attente de validation — intervention admin requise` });
+
+    const urgentsNonTraites = dons.filter(
+      (d) => d.urgence === 'ELEVEE' && !['LIVRE', 'ANNULE', 'EN_COLLECTE'].includes(d.statut || '')
+    ).length;
+    if (urgentsNonTraites)
+      insights.push({ niveau: 'urgent', message: `${urgentsNonTraites} don(s) urgents non encore collectés` });
+
+    return insights;
+  });
+
+  protected statsParStatutEntries(): Array<{ statut: string; count: number }> {
+    const stats = this.statsInventaire();
+    const ordre = ['CREE', 'EN_ATTENTE_VALIDATION', 'VALIDE', 'RESERVE', 'EN_COLLECTE', 'LIVRE', 'ANNULE'];
+    return ordre
+      .filter((s) => stats.parStatut[s])
+      .map((s) => ({ statut: s, count: stats.parStatut[s] }));
+  }
+
   protected ouvrirFormulaireDonation(donation?: Donation): void {
     if (donation) {
       this.donationEnEdition.set(donation);
@@ -1322,11 +1485,15 @@ export class App implements OnInit, OnDestroy {
       this.donationForm.latitude = u?.localisation?.latitude ?? 36.8065;
       this.donationForm.longitude = u?.localisation?.longitude ?? 10.1815;
     }
+    this.suggestionCategorieDon.set(null);
+    this.urgenceAutoCalculee.set(false);
     this.formulaireDonationOuvert.set(true);
   }
 
   protected fermerFormulaireDonation(): void {
     this.donationEnEdition.set(null);
+    this.suggestionCategorieDon.set(null);
+    this.urgenceAutoCalculee.set(false);
     this.formulaireDonationOuvert.set(false);
   }
 

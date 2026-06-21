@@ -1048,6 +1048,56 @@
             </section>
           }
 
+          @if (insightsIA().length) {
+            <section class="ia-insights-bar">
+              <span class="ia-badge">✦ IA</span>
+              <span class="ia-insights-bar__title">Analyse</span>
+              <div class="ia-insights-bar__chips">
+                @for (insight of insightsIA(); track insight.message) {
+                  <span class="ia-chip ia-chip--{{ insight.niveau }}">
+                    {{ insight.niveau === "urgent" ? "🔴" : insight.niveau === "warning" ? "🟡" : "🔵" }}
+                    {{ insight.message }}
+                  </span>
+                }
+              </div>
+            </section>
+          }
+
+          <section class="inv-dashboard">
+            <article class="inv-kpi">
+              <span class="inv-kpi__value">{{ statsInventaire().total }}</span>
+              <span class="inv-kpi__label">Total dons</span>
+            </article>
+            <article class="inv-kpi inv-kpi--green">
+              <span class="inv-kpi__value">{{ statsInventaire().livres }}</span>
+              <span class="inv-kpi__label">Livrés</span>
+            </article>
+            <article class="inv-kpi inv-kpi--orange">
+              <span class="inv-kpi__value">{{ statsInventaire().urgencesElevees }}</span>
+              <span class="inv-kpi__label">Urgences élevées</span>
+            </article>
+            <article class="inv-kpi inv-kpi--blue">
+              <span class="inv-kpi__value">{{ statsInventaire().poidsTotal }} kg</span>
+              <span class="inv-kpi__label">Poids total</span>
+            </article>
+            <article class="inv-kpi-chart panel">
+              <span class="eyebrow">Répartition par statut</span>
+              <div class="inv-statut-bars">
+                @for (entry of statsParStatutEntries(); track entry.statut) {
+                  <div class="inv-statut-bar">
+                    <span class="inv-statut-bar__label">{{ libelleStatutDon(entry.statut) }}</span>
+                    <div class="inv-statut-bar__track">
+                      <div class="inv-statut-bar__fill inv-statut-bar__fill--{{ entry.statut }}"
+                           [style.width.%]="(entry.count / statsInventaire().maxStatut) * 100">
+                      </div>
+                    </div>
+                    <span class="inv-statut-bar__count">{{ entry.count }}</span>
+                  </div>
+                }
+              </div>
+            </article>
+          </section>
+
           <section class="panel">
             <div class="panel__header">
               <div>
@@ -1061,19 +1111,44 @@
               }
             </div>
 
-            <div class="filter-row">
-              <select [ngModel]="filtreDonationStatut()" (ngModelChange)="filtreDonationStatut.set($event)" name="filtreDonationStatut">
-                @for (s of ["TOUS","CREE","EN_ATTENTE_VALIDATION","VALIDE","RESERVE","EN_COLLECTE","LIVRE","ANNULE"]; track s) {
-                  <option [value]="s">{{ s === "TOUS" ? "Tous les statuts" : libelleStatutDon(s) }}</option>
-                }
-              </select>
-              <select [ngModel]="filtreDonationUrgence()" (ngModelChange)="filtreDonationUrgence.set($event)" name="filtreDonationUrgence">
-                <option value="TOUS">Toutes urgences</option>
-                <option value="ELEVEE">Élevée</option>
-                <option value="MOYENNE">Moyenne</option>
-                <option value="FAIBLE">Faible</option>
-              </select>
+            <div class="inv-filters">
+              <input
+                class="inv-search"
+                type="search"
+                placeholder="🔍 Rechercher un don…"
+                [ngModel]="rechercheInventaire()"
+                (ngModelChange)="rechercheInventaire.set($event)"
+                name="rechercheInventaire"
+              />
+              <div class="inv-filters__selects">
+                <select [ngModel]="filtreDonationCategorie()" (ngModelChange)="filtreDonationCategorie.set($event)" name="filtreDonCat">
+                  <option value="TOUS">Catégorie</option>
+                  @for (cat of categories(); track cat._id) {
+                    <option [value]="cat._id">{{ cat.nom }}</option>
+                  }
+                </select>
+                <select [ngModel]="filtreDonationStatut()" (ngModelChange)="filtreDonationStatut.set($event)" name="filtreDonStatut">
+                  <option value="TOUS">Statut</option>
+                  @for (s of ["CREE","EN_ATTENTE_VALIDATION","VALIDE","RESERVE","EN_COLLECTE","LIVRE","ANNULE"]; track s) {
+                    <option [value]="s">{{ libelleStatutDon(s) }}</option>
+                  }
+                </select>
+                <select [ngModel]="filtreDonationUrgence()" (ngModelChange)="filtreDonationUrgence.set($event)" name="filtreDonUrgence">
+                  <option value="TOUS">Urgence</option>
+                  <option value="ELEVEE">Élevée</option>
+                  <option value="MOYENNE">Moyenne</option>
+                  <option value="FAIBLE">Faible</option>
+                </select>
+                <select [ngModel]="triDonation()" (ngModelChange)="triDonation.set($event)" name="triDon">
+                  <option value="DATE">↕ Date</option>
+                  <option value="URGENCE">↕ Urgence</option>
+                  <option value="POIDS">↕ Poids</option>
+                  <option value="EXPIRATION">↕ Expiration</option>
+                </select>
+              </div>
             </div>
+
+            <p class="inv-results-count">{{ donationsFiltrees().length }} résultat(s)</p>
 
             @if (!donationsFiltrees().length) {
               <p class="empty-hint">Aucun don trouvé pour ces filtres.</p>
@@ -1081,9 +1156,20 @@
 
             <div class="donation-grid">
               @for (don of donationsFiltrees(); track don._id) {
-                <article class="donation-card">
+                <article
+                  class="donation-card"
+                  [class.donation-card--critique]="niveauExpiration(don) === 'CRITIQUE'"
+                  [class.donation-card--attention]="niveauExpiration(don) === 'ATTENTION'"
+                  (click)="ouvrirDetailDonation(don)"
+                  style="cursor:pointer"
+                >
                   @if (don.images?.[0]) {
                     <img class="donation-card__img" [src]="don.images![0]" [alt]="don.titre" />
+                  }
+                  @if (niveauExpiration(don)) {
+                    <div class="donation-card__expiry-alert">
+                      ⚠ {{ niveauExpiration(don) === "CRITIQUE" ? "Expire très bientôt !" : "Expire dans 48h" }}
+                    </div>
                   }
                   <div class="donation-card__header">
                     <span class="badge badge--urgence-{{ don.urgence }}">{{ don.urgence }}</span>
@@ -1102,7 +1188,7 @@
                   @if (don.fournisseur) {
                     <p class="donation-card__meta">Par : {{ don.fournisseur.prenom }} {{ don.fournisseur.nom }}</p>
                   }
-                  <div class="donation-card__actions">
+                  <div class="donation-card__actions" (click)="$event.stopPropagation()">
                     @if (peutModifierDonation(don)) {
                       <button class="button button--sm button--secondary" type="button" (click)="ouvrirFormulaireDonation(don)">
                         Modifier
@@ -1490,6 +1576,95 @@
     </form>
   }
 
+  @if (donationSelectionnee(); as don) {
+    <div class="modal-backdrop" (click)="fermerDetailDonation()"></div>
+    <div class="modal modal--large">
+      <button class="modal__close" type="button" (click)="fermerDetailDonation()">×</button>
+      <span class="eyebrow">Détail du don</span>
+      <h2>{{ don.titre }}</h2>
+      @if (don.images?.[0]) {
+        <img class="don-detail__img" [src]="don.images![0]" [alt]="don.titre" />
+      }
+      @if (niveauExpiration(don)) {
+        <div class="don-detail__alert don-detail__alert--{{ niveauExpiration(don) }}">
+          ⚠ {{ niveauExpiration(don) === "CRITIQUE" ? "Ce don expire très bientôt !" : "Ce don expire dans moins de 48h" }}
+        </div>
+      }
+      <div class="don-detail__badges">
+        <span class="badge badge--urgence-{{ don.urgence }}">Urgence : {{ don.urgence }}</span>
+        <span class="badge">{{ libelleStatutDon(don.statut || "CREE") }}</span>
+        @if (don.categorieDonation) {
+          <span class="badge">{{ don.categorieDonation.nom }}</span>
+        }
+      </div>
+      <div class="don-detail__grid">
+        <div class="don-detail__field">
+          <label>Description</label>
+          <p>{{ don.description || "—" }}</p>
+        </div>
+        <div class="don-detail__field">
+          <label>Composition du lot</label>
+          <p>{{ don.compositionLot || "—" }}</p>
+        </div>
+        <div class="don-detail__field">
+          <label>Quantité</label>
+          <p>{{ don.quantiteEstimee }} {{ don.unite }}</p>
+        </div>
+        <div class="don-detail__field">
+          <label>Poids total</label>
+          <p>{{ don.poidsTotalKg }} kg</p>
+        </div>
+        <div class="don-detail__field">
+          <label>Fournisseur</label>
+          <p>{{ don.fournisseur?.prenom }} {{ don.fournisseur?.nom }}</p>
+        </div>
+        <div class="don-detail__field">
+          <label>Bénéficiaire</label>
+          <p>{{ don.beneficiaire ? (don.beneficiaire.prenom + " " + don.beneficiaire.nom) : "Non assigné" }}</p>
+        </div>
+        <div class="don-detail__field">
+          <label>Adresse de collecte</label>
+          <p>{{ don.adresseCollecte || "—" }}</p>
+        </div>
+        <div class="don-detail__field">
+          <label>Date de disponibilité</label>
+          <p>{{ dateCourte(don.dateDisponibilite) }}</p>
+        </div>
+        <div class="don-detail__field">
+          <label>Date limite de collecte</label>
+          <p>{{ dateCourte(don.dateLimiteCollecte) }}</p>
+        </div>
+        @if (don.temperatureStockage !== null && don.temperatureStockage !== undefined) {
+          <div class="don-detail__field">
+            <label>Température de stockage</label>
+            <p>{{ don.temperatureStockage }} °C</p>
+          </div>
+        }
+        @if (don.conditionsStockage) {
+          <div class="don-detail__field">
+            <label>Conditions de stockage</label>
+            <p>{{ don.conditionsStockage }}</p>
+          </div>
+        }
+      </div>
+      <footer class="modal__footer">
+        @if (peutModifierDonation(don)) {
+          <button class="button button--secondary" type="button" (click)="fermerDetailDonation(); ouvrirFormulaireDonation(don)">
+            Modifier
+          </button>
+        }
+        @if (["ADMIN","ONG","TRANSPORTEUR"].includes(utilisateur()?.role || "")) {
+          @for (statut of prochainStatutsDon(don); track statut) {
+            <button class="button button--primary" type="button" (click)="changerStatutDonation(don, statut); fermerDetailDonation()">
+              → {{ libelleStatutDon(statut) }}
+            </button>
+          }
+        }
+        <button class="button" type="button" (click)="fermerDetailDonation()">Fermer</button>
+      </footer>
+    </div>
+  }
+
   @if (formulaireDonationOuvert()) {
     <div class="modal-backdrop" (click)="fermerFormulaireDonation()"></div>
     <form class="modal modal--large" (ngSubmit)="enregistrerDonation()">
@@ -1499,8 +1674,20 @@
       <div class="form-grid">
         <label class="form-grid__full">
           Titre *
-          <input type="text" name="don_titre" [(ngModel)]="donationForm.titre" required />
+          <input type="text" name="don_titre" [(ngModel)]="donationForm.titre" (input)="onTitreDonChange()" required />
         </label>
+        @if (suggestionCategorieDon(); as sug) {
+          <div class="form-grid__full ia-suggestion">
+            <span class="ia-badge">✦ IA</span>
+            <span>Catégorie suggérée : <strong>{{ sug.categorie?.nom || sug.typeProduit }}</strong></span>
+            <button class="button button--sm button--primary" type="button" (click)="appliquerSuggestionCategorieDon()">
+              Appliquer
+            </button>
+            <button class="button button--sm" type="button" (click)="suggestionCategorieDon.set(null)">
+              Ignorer
+            </button>
+          </div>
+        }
         <label class="form-grid__full">
           Description
           <textarea name="don_description" [(ngModel)]="donationForm.description" rows="2"></textarea>
@@ -1514,8 +1701,8 @@
           </select>
         </label>
         <label>
-          Urgence
-          <select name="don_urgence" [(ngModel)]="donationForm.urgence">
+          Urgence @if (urgenceAutoCalculee()) { <span class="ia-auto-label">✦ calculée par IA</span> }
+          <select name="don_urgence" [(ngModel)]="donationForm.urgence" (ngModelChange)="urgenceAutoCalculee.set(false)">
             <option value="FAIBLE">Faible</option>
             <option value="MOYENNE">Moyenne</option>
             <option value="ELEVEE">Élevée</option>
@@ -1551,7 +1738,8 @@
         </label>
         <label>
           Date limite de collecte *
-          <input type="datetime-local" name="don_limite" [(ngModel)]="donationForm.dateLimiteCollecte" required />
+          <input type="datetime-local" name="don_limite" [(ngModel)]="donationForm.dateLimiteCollecte" (change)="onDateLimiteChange()" required />
+          <small class="ia-hint">L'urgence sera calculée automatiquement par l'IA</small>
         </label>
         <label class="form-grid__full">
           Adresse de collecte *
