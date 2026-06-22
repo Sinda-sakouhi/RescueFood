@@ -72,6 +72,11 @@ const userSchema = new mongoose.Schema(
       enum: ['EN_ATTENTE', 'VALIDE', 'REFUSE', 'SUSPENDU'],
       default: 'EN_ATTENTE'
     },
+    categorieAssociation: {
+      type: String,
+      enum: ['HUMANITAIRE', 'ANIMAUX', 'EDUCATION', 'SANTE', 'ALIMENTAIRE', 'LOGEMENT', 'ENVIRONNEMENT', 'AUTRE', null],
+      default: null
+    },
     avatarUrl: {
       type: String,
       trim: true,

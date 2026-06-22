@@ -40,6 +40,7 @@ interface Utilisateur {
   adresse?: string;
   localisation?: Coordonnees;
   statutCompte?: string;
+  categorieAssociation?: string;
   createdAt?: string;
 }
 
@@ -298,7 +299,7 @@ export class App implements OnInit, OnDestroy {
   ];
 
   protected readonly section = signal<Section>('overview');
-  protected readonly vueAuth = signal<'connexion' | 'inscription'>('connexion');
+  protected readonly vueAuth = signal<'connexion' | 'inscription' | 'connexion-ong'>('connexion');
   protected readonly email = signal('admin@rescuefood.demo');
   protected readonly motDePasse = signal('Demo1234!');
   protected readonly utilisateur = signal<Utilisateur | null>(null);
@@ -316,8 +317,20 @@ export class App implements OnInit, OnDestroy {
     motDePasse: '',
     telephone: '',
     role: 'FOURNISSEUR',
-    adresse: ''
+    adresse: '',
+    categorieAssociation: 'HUMANITAIRE'
   };
+
+  protected readonly categoriesAssociation = [
+    { value: 'HUMANITAIRE', label: 'Association humanitaire', emoji: '🤝' },
+    { value: 'ANIMAUX',     label: 'Protection des animaux', emoji: '🐾' },
+    { value: 'ALIMENTAIRE', label: 'Aide alimentaire',        emoji: '🍽️' },
+    { value: 'EDUCATION',   label: 'Éducation & jeunesse',   emoji: '📚' },
+    { value: 'SANTE',       label: 'Santé & bien-être',      emoji: '❤️' },
+    { value: 'LOGEMENT',    label: 'Logement & hébergement', emoji: '🏠' },
+    { value: 'ENVIRONNEMENT',label: 'Environnement',         emoji: '🌱' },
+    { value: 'AUTRE',       label: 'Autre',                  emoji: '🌍' }
+  ];
 
   protected readonly rolesInscription = [
     { value: 'FOURNISSEUR', label: 'Fournisseur', hint: 'Surplus à donner' },
@@ -700,6 +713,20 @@ export class App implements OnInit, OnDestroy {
     this.vueAuth.set('connexion');
   }
 
+  protected basculerVersConnexionOng(): void {
+    this.effacerMessages();
+    this.inscriptionSucces.set('');
+    this.vueAuth.set('connexion-ong');
+  }
+
+  protected libelleCategorieAssociation(valeur: string | null | undefined): string {
+    return this.categoriesAssociation.find(c => c.value === valeur)?.label ?? 'Association';
+  }
+
+  protected emojiCategorieAssociation(valeur: string | null | undefined): string {
+    return this.categoriesAssociation.find(c => c.value === valeur)?.emoji ?? '🌍';
+  }
+
   protected inscrire(): void {
     this.chargementInscription.set(true);
     this.effacerMessages();
@@ -711,7 +738,8 @@ export class App implements OnInit, OnDestroy {
         motDePasse: this.registerForm.motDePasse,
         telephone: this.registerForm.telephone,
         role: this.registerForm.role,
-        adresse: this.registerForm.adresse
+        adresse: this.registerForm.adresse,
+        ...(this.registerForm.role === 'ONG' && { categorieAssociation: this.registerForm.categorieAssociation })
       })
       .subscribe({
         next: ({ message }) => {
@@ -1693,6 +1721,10 @@ export class App implements OnInit, OnDestroy {
     this.http.get<{ annonces: Annonce[] }>('/api/annonces').subscribe({
       next: ({ annonces }) => this.annonces.set(annonces),
       error: (error) => this.signaler(error, 'Annonces indisponibles.')
+    });
+    this.http.get<{ donations: Donation[] }>('/api/donations?limit=100', { headers: this.entetes() }).subscribe({
+      next: ({ donations }) => this.donations.set(donations),
+      error: () => {}
     });
   }
 

@@ -421,6 +421,120 @@ input:disabled {
   color: #1f704f;
 }
 
+.auth-switch-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ONG Registration block */
+.ong-register-block {
+  background: linear-gradient(135deg, #edf6f0, #f0f8f4);
+  border: 1px solid #b8dcc7;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.ong-cat-label {
+  display: grid;
+  gap: 5px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #1f704f;
+
+  select {
+    font-size: 0.78rem;
+    border: 1px solid #b8dcc7;
+    border-radius: 7px;
+    padding: 8px 10px;
+    background: #fff;
+    color: #1a3a2a;
+    cursor: pointer;
+
+    &:focus { outline: 2px solid #1f704f; border-color: transparent; }
+  }
+}
+
+.ong-cat-hint {
+  margin: 0;
+  font-size: 0.6rem;
+  color: #5a9070;
+}
+
+/* ONG Login view */
+.login-card--ong {
+  border-top: 4px solid #1f704f;
+}
+
+.ong-login-header {
+  display: grid;
+  gap: 4px;
+}
+
+.ong-login-badge {
+  display: inline-block;
+  background: #1f704f;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: 20px;
+  letter-spacing: 0.04em;
+  width: fit-content;
+}
+
+.ong-categories-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.ong-cat-chip {
+  background: #edf6f0;
+  border: 1px solid #b8dcc7;
+  color: #1f704f;
+  font-size: 0.58rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 20px;
+}
+
+.button--ong {
+  background: #1f704f;
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  padding: 12px;
+  font-weight: 800;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 150ms;
+
+  &:hover { background: #175c3e; }
+}
+
+.ong-login-link {
+  color: #1f704f !important;
+  font-weight: 800;
+}
+
+/* ONG profile badge */
+.ong-profile-cat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #edf6f0;
+  border: 1px solid #b8dcc7;
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-size: 0.7rem;
+  color: #1f704f;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
 .register-success {
   display: grid;
   gap: 14px;

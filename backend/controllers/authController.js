@@ -17,7 +17,8 @@ async function register(request, response, next) {
       telephone,
       role = 'CITOYEN',
       adresse,
-      localisation
+      localisation,
+      categorieAssociation
     } = request.body;
 
     if (
@@ -57,6 +58,7 @@ async function register(request, response, next) {
       role,
       adresse,
       localisation,
+      categorieAssociation: role === 'ONG' ? (categorieAssociation || 'HUMANITAIRE') : null,
       statutCompte: 'EN_ATTENTE'
     });
 

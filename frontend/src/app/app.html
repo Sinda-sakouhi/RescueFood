@@ -20,6 +20,7 @@
       <div class="login-story__stats">
         <span><strong>{{ annonces().length }}</strong> annonces actives</span>
         <span><strong>{{ categories().length }}</strong> catégories</span>
+        <span><strong>{{ donations().length || "—" }}</strong> donations</span>
         <span><strong>5</strong> rôles à tester</span>
       </div>
     </section>
@@ -82,11 +83,70 @@
             {{ chargementConnexion() ? "Connexion…" : "Ouvrir l'espace de test" }}
           </button>
           <p class="demo-note">Mot de passe commun : <code>Demo1234!</code></p>
+          <div class="auth-switch-row">
+            <p class="auth-switch">
+              Nouveau sur RescueFood ?
+              <button type="button" (click)="basculerVersInscription()">
+                Créer un compte
+              </button>
+            </p>
+            <p class="auth-switch">
+              Vous êtes une association ?
+              <button type="button" class="ong-login-link" (click)="basculerVersConnexionOng()">
+                Espace Association →
+              </button>
+            </p>
+          </div>
+        </form>
+      } @else if (vueAuth() === 'connexion-ong') {
+        <form class="login-card login-card--ong" (ngSubmit)="connexion()">
+          <div class="ong-login-header">
+            <span class="ong-login-badge">🤝 Espace Association</span>
+            <h2>Connexion Association</h2>
+            <p>Connectez-vous pour accéder à vos dons reçus et gérer votre association.</p>
+          </div>
+
+          <div class="ong-categories-preview">
+            @for (cat of categoriesAssociation; track cat.value) {
+              <span class="ong-cat-chip">{{ cat.emoji }} {{ cat.label }}</span>
+            }
+          </div>
+
+          <div class="login-fields">
+            <label>
+              Adresse email de l'association
+              <input
+                type="email"
+                name="ong-email"
+                [ngModel]="email()"
+                (ngModelChange)="email.set($event)"
+                required
+                placeholder="contact@association.org"
+              />
+            </label>
+            <label>
+              Mot de passe
+              <input
+                type="password"
+                name="ong-motDePasse"
+                [ngModel]="motDePasse()"
+                (ngModelChange)="motDePasse.set($event)"
+                required
+              />
+            </label>
+          </div>
+
+          @if (erreur()) {
+            <p class="form-message form-message--error">{{ erreur() }}</p>
+          }
+
+          <button class="button button--ong button--wide" type="submit">
+            {{ chargementConnexion() ? "Connexion…" : "Accéder à l'espace association" }}
+          </button>
           <p class="auth-switch">
-            Nouveau sur RescueFood ?
-            <button type="button" (click)="basculerVersInscription()">
-              Créer un compte
-            </button>
+            <button type="button" (click)="basculerVersConnexion()">← Retour connexion standard</button>
+            &nbsp;·&nbsp;
+            <button type="button" (click)="basculerVersInscription()">Créer un compte association</button>
           </p>
         </form>
       } @else {
@@ -128,6 +188,20 @@
                 </button>
               }
             </div>
+
+            @if (registerForm.role === 'ONG') {
+              <div class="ong-register-block">
+                <label class="ong-cat-label">
+                  <span>🏷️ Catégorie de l'association</span>
+                  <select name="categorieAssociation" [(ngModel)]="registerForm.categorieAssociation" required>
+                    @for (cat of categoriesAssociation; track cat.value) {
+                      <option [value]="cat.value">{{ cat.emoji }} {{ cat.label }}</option>
+                    }
+                  </select>
+                </label>
+                <p class="ong-cat-hint">Cette catégorie aide à mieux cibler les dons adaptés à votre association.</p>
+              </div>
+            }
 
             <div class="form-grid">
               <label>
@@ -1273,6 +1347,12 @@
               <h2>{{ utilisateur()?.prenom }} {{ utilisateur()?.nom }}</h2>
               <p>{{ utilisateur()?.email }}</p>
               <i class="role-pill">{{ utilisateur()?.role }}</i>
+              @if (utilisateur()?.role === 'ONG' && utilisateur()?.categorieAssociation) {
+                <div class="ong-profile-cat">
+                  <span>{{ emojiCategorieAssociation(utilisateur()?.categorieAssociation) }}</span>
+                  <strong>{{ libelleCategorieAssociation(utilisateur()?.categorieAssociation) }}</strong>
+                </div>
+              }
               <div>
                 <span>Statut du compte</span>
                 <strong>{{ utilisateur()?.statutCompte }}</strong>

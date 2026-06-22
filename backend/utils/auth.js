@@ -44,6 +44,7 @@ function toPublicUser(user) {
     adresse: user.adresse,
     localisation: user.localisation,
     statutCompte: user.statutCompte,
+    categorieAssociation: user.categorieAssociation,
     avatarUrl: user.avatarUrl,
     emailVerifie: user.emailVerifie,
     derniereConnexion: user.derniereConnexion,
