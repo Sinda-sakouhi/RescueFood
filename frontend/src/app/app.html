@@ -307,8 +307,8 @@
           >
             <span class="nav__icon">{{ item.icon }}</span>
             <span>{{ item.label }}</span>
-            @if (item.id === "messages" && conversations().length) {
-              <i class="nav__count">{{ conversations().length }}</i>
+            @if (item.id === "messages" && totalNonLus()) {
+              <i class="nav__count nav__count--unread">{{ totalNonLus() }}</i>
             }
             @if (item.id === "logistique" && dashboardLogistique().kpis.collectesActives) {
               <i class="nav__count">{{
@@ -320,10 +320,10 @@
       </nav>
 
       <div class="sidebar__coverage">
-        <span>Couverture API</span>
-        <strong>7 / 7 modules</strong>
+        <span>Flux RescueFood</span>
+        <strong>Annonce → Don → Livraison</strong>
         <i><b style="width: 100%"></b></i>
-        <small>CRUD donations désormais disponible</small>
+        <small>Plateforme anti-gaspillage alimentaire</small>
       </div>
 
       <button class="logout-button" type="button" (click)="deconnexion()">
@@ -342,11 +342,15 @@
             }
             @case ("annonces") {
               <h1>Annonces</h1>
-              <p>Offres de surplus et demandes des associations.</p>
+              @if (utilisateur()?.role === 'ONG') {
+                <p>Consultez les offres à prix réduit des fournisseurs et publiez vos demandes de besoin.</p>
+              } @else {
+                <p>Publiez et gérez vos offres de surplus alimentaire à prix promotionnel.</p>
+              }
             }
             @case ("matching") {
               <h1>Matching intelligent</h1>
-              <p>Les meilleures correspondances entre offre et besoin.</p>
+              <p>Connexion automatique entre les dons disponibles (inventaire) et les besoins des associations.</p>
             }
             @case ("messages") {
               <h1>Messagerie</h1>
@@ -366,7 +370,13 @@
             }
             @case ("inventaire") {
               <h1>Inventaire</h1>
-              <p>Gestion des dons alimentaires et des catégories.</p>
+              @if (utilisateur()?.role === 'FOURNISSEUR') {
+                <p>Créez et gérez vos lots de dons alimentaires. Ces dons seront proposés au matching.</p>
+              } @else if (utilisateur()?.role === 'ONG') {
+                <p>Consultez les dons disponibles des fournisseurs. Le matching automatique vous proposera les correspondances.</p>
+              } @else {
+                <p>Gestion des dons alimentaires et des catégories.</p>
+              }
             }
             @case ("diagnostic") {
               <h1>Diagnostic fonctionnel</h1>
@@ -378,11 +388,6 @@
           <button class="icon-button" type="button" title="Actualiser" (click)="chargerTout()">
             ↻
           </button>
-          @if (section() === "annonces" && peutPublier()) {
-            <button class="button button--primary" type="button" (click)="ouvrirFormulaireAnnonce()">
-              + Nouvelle annonce
-            </button>
-          }
           @if (section() === "logistique") {
             <button class="button button--secondary" type="button" (click)="telechargerRapport()">
               ↓ Rapport PDF
@@ -464,9 +469,9 @@
                 </div>
               </div>
               <div class="journey">
-                <button type="button" (click)="naviguer('annonces')">
+                <button type="button" (click)="naviguer('inventaire')">
                   <i>01</i>
-                  <span><strong>Publier</strong><small>Offre ou demande</small></span>
+                  <span><strong>Créer</strong><small>Don ou besoin</small></span>
                 </button>
                 <b>→</b>
                 <button type="button" (click)="naviguer('matching')">
@@ -495,13 +500,13 @@
               </div>
               <div class="role-guide__body">
                 @if (utilisateur()?.role === "ADMIN") {
-                  <p>Validez des comptes, assignez un transporteur et exportez le rapport logistique.</p>
+                  <p>Validez des comptes, gérez les catégories dans l'inventaire, assignez des transporteurs et exportez le rapport logistique.</p>
                 } @else if (utilisateur()?.role === "FOURNISSEUR") {
-                  <p>Publiez une offre, acceptez une suggestion puis écrivez à l'ONG.</p>
+                  <p>1. <strong>Annonces</strong> : publiez une offre à prix réduit. 2. <strong>Inventaire</strong> : créez un don physique. 3. <strong>Matching</strong> : acceptez une suggestion pour déclencher la livraison.</p>
                 } @else if (utilisateur()?.role === "ONG") {
-                  <p>Publiez une demande, consultez les offres compatibles et suivez la livraison.</p>
+                  <p>1. <strong>Annonces</strong> : publiez votre demande de besoin. 2. <strong>Matching</strong> : consultez les dons compatibles. 3. <strong>Messages</strong> : coordonnez la récupération avec le fournisseur.</p>
                 } @else if (utilisateur()?.role === "TRANSPORTEUR") {
-                  <p>Ouvrez une collecte, faites avancer son statut et envoyez une position GPS.</p>
+                  <p>Consultez les collectes assignées dans <strong>Logistique</strong>, faites avancer leur statut et mettez à jour votre position GPS.</p>
                 } @else {
                   <p>Consultez les annonces publiques et vérifiez les informations disponibles.</p>
                 }
@@ -543,191 +548,380 @@
         }
 
         @case ("annonces") {
-          <section class="toolbar">
-            <div class="segmented">
-              @for (type of ["TOUS", "OFFRE", "DEMANDE"]; track type) {
-                <button
-                  type="button"
-                  [class.segmented__active]="filtreAnnonce() === type"
-                  (click)="filtreAnnonce.set($any(type))"
-                >
-                  {{ type === "TOUS" ? "Toutes" : type === "OFFRE" ? "Offres" : "Demandes" }}
-                </button>
-              }
-            </div>
-            <div class="toolbar__filters">
-              <select
-                [ngModel]="filtreCategorie()"
-                (ngModelChange)="filtreCategorie.set($event)"
-              >
-                <option value="TOUS">Toutes catégories</option>
-                @for (categorie of categories(); track categorie._id) {
-                  <option [value]="categorie._id">{{ categorie.nom }}</option>
-                }
-              </select>
-              <select
-                [ngModel]="triAnnonce()"
-                (ngModelChange)="triAnnonce.set($any($event))"
-              >
-                <option value="RECENT">Plus récentes</option>
-                <option value="URGENCE">Urgence</option>
-                <option value="EXPIRATION">Expiration proche</option>
-              </select>
-              <label class="search-field">
-                <span>⌕</span>
-                <input
-                  type="search"
-                  placeholder="Titre, auteur ou catégorie"
-                  [ngModel]="rechercheAnnonce()"
-                  (ngModelChange)="rechercheAnnonce.set($event)"
-                />
-              </label>
-            </div>
-          </section>
 
-          @if (peutPublier()) {
-            <section class="my-announcements">
-              <div class="section-title">
+          @if (utilisateur()?.role === 'ONG') {
+
+            <!-- ======= VUE ONG ======= -->
+            <section class="inv-dashboard">
+              <article class="inv-kpi inv-kpi--green">
+                <span class="inv-kpi__value">{{ annoncesOffrePubliques().length }}</span>
+                <span class="inv-kpi__label">Offres disponibles</span>
+              </article>
+              <article class="inv-kpi inv-kpi--blue">
+                <span class="inv-kpi__value">{{ statsAnnonces().total }}</span>
+                <span class="inv-kpi__label">Mes demandes</span>
+              </article>
+              <article class="inv-kpi">
+                <span class="inv-kpi__value">{{ statsAnnonces().actives }}</span>
+                <span class="inv-kpi__label">Demandes actives</span>
+              </article>
+              <article class="inv-kpi inv-kpi--orange">
+                <span class="inv-kpi__value">{{ statsAnnonces().expirantBientot }}</span>
+                <span class="inv-kpi__label">Expirent dans 24h</span>
+              </article>
+            </section>
+
+            <!-- Bloc 1 : Offres promotionnelles à prix réduit -->
+            <section class="panel">
+              <div class="panel__header">
                 <div>
-                  <span class="eyebrow">Votre espace</span>
-                  <h2>Mes annonces</h2>
+                  <span class="eyebrow">Promotions fournisseurs</span>
+                  <h2>Offres à prix réduit</h2>
                 </div>
-                <span>{{ mesAnnonces().length }}</span>
+                <span class="result-count">{{ annoncesOffreOngFiltrees().length }} résultat(s)</span>
               </div>
-              <div class="mini-card-row">
-                @for (annonce of mesAnnonces(); track annonce._id) {
-                  <article class="mini-announcement">
-                    <i [attr.data-type]="annonce.type">{{ annonce.type }}</i>
-                    <strong>{{ annonce.titre }}</strong>
-                    <small>{{ annonce.quantiteEstimee }} {{ annonce.unite }} · {{ libelleStatut(annonce.statut) }}</small>
-                    @if (annonce.statut === "ACTIVE") {
-                      <button type="button" (click)="annulerAnnonce(annonce)">Annuler</button>
+              <div class="filter-bar">
+                <label class="search-field search-field--grow">
+                  <input
+                    class="inv-search"
+                    type="search"
+                    placeholder="Rechercher une offre…"
+                    [ngModel]="rechercheOffreOng()"
+                    (ngModelChange)="rechercheOffreOng.set($event)"
+                    name="rechercheOffreOng"
+                  />
+                </label>
+                <select [ngModel]="filtreOffreCategorieOng()" (ngModelChange)="filtreOffreCategorieOng.set($event)" name="filtreCatOffre">
+                  <option value="TOUS">Toutes catégories</option>
+                  @for (cat of categories(); track cat._id) {
+                    <option [value]="cat._id">{{ cat.nom }}</option>
+                  }
+                </select>
+                <select [ngModel]="filtreOffrePrixOng()" (ngModelChange)="filtreOffrePrixOng.set($event)" name="filtrePrixOffre">
+                  <option value="TOUS">Tous les prix</option>
+                  <option value="PAYANT">À prix réduit</option>
+                  <option value="GRATUIT">Gratuit</option>
+                </select>
+              </div>
+              @if (!annoncesOffreOngFiltrees().length) {
+                <p class="empty-hint">Aucune offre ne correspond à vos critères.</p>
+              }
+              <div class="donation-grid">
+                @for (annonce of annoncesOffreOngFiltrees(); track annonce._id) {
+                  <article
+                    class="donation-card"
+                    [class.donation-card--critique]="niveauUrgenceTemps(annonce.dateExpiration) === 'CRITIQUE'"
+                    [class.donation-card--attention]="niveauUrgenceTemps(annonce.dateExpiration) === 'ATTENTION'"
+                  >
+                    @if (niveauUrgenceTemps(annonce.dateExpiration) === 'CRITIQUE') {
+                      <div class="donation-card__expiry-alert">Expire très bientôt !</div>
                     }
+                    <div class="donation-card__header">
+                      <span class="badge badge--annonce-OFFRE">Surplus</span>
+                      <span class="badge badge--urgence-{{ annonce.urgence }}">{{ annonce.urgence }}</span>
+                    </div>
+                    <h3>{{ annonce.titre }}</h3>
+                    <p class="donation-card__meta">{{ annonce.quantiteEstimee }} {{ annonce.unite }} &middot; {{ annonce.categorieDonation.nom }}</p>
+                    @if (annonce.prixPromo != null) {
+                      <p class="annonce-prix">{{ annonce.prixPromo | number:'1.2-2' }} TND <span class="annonce-prix__label">prix promo</span></p>
+                    } @else {
+                      <p class="annonce-prix" style="color:#1f7a55">Gratuit</p>
+                    }
+                    @if (annonce.adresse) {
+                      <p class="donation-card__address">📍 {{ annonce.adresse }}</p>
+                    }
+                    <p class="donation-card__deadline">
+                      Expire : {{ dateCourte(annonce.dateExpiration) }}
+                      <span class="risk-chip" [attr.data-level]="niveauUrgenceTemps(annonce.dateExpiration)">{{ tempsRestant(annonce.dateExpiration) }}</span>
+                    </p>
+                    @if (annonce.auteur) {
+                      <p class="donation-card__meta">Par : {{ annonce.auteur.prenom }} {{ annonce.auteur.nom }}</p>
+                    }
+                    <div class="donation-card__actions" (click)="$event.stopPropagation()">
+                      @if (annonce.prixPromo != null) {
+                        <button
+                          class="button button--primary button--sm annonce-achat-btn"
+                          type="button"
+                          (click)="contacterFournisseur(annonce)"
+                        >
+                          🛒 Acheter · {{ annonce.prixPromo | number:'1.2-2' }} TND
+                        </button>
+                      } @else {
+                        <span class="annonce-matching-hint">Disponible via matching automatique</span>
+                      }
+                    </div>
                   </article>
-                } @empty {
-                  <p class="empty-inline">Vous n'avez pas encore d'annonce.</p>
                 }
               </div>
             </section>
-          }
 
-          <section class="announcement-grid">
-            @for (annonce of annoncesFiltrees(); track annonce._id) {
-              <article class="announcement-card">
-                <div class="announcement-card__top">
-                  <span class="type-badge" [attr.data-type]="annonce.type">
-                    {{ annonce.type === "OFFRE" ? "Surplus disponible" : "Besoin recherché" }}
-                  </span>
-                  <i class="urgency-dot" [attr.data-urgency]="annonce.urgence"></i>
+            <!-- Bloc 2 : Mes demandes de besoin -->
+            <section class="panel">
+              <div class="panel__header">
+                <div>
+                  <span class="eyebrow">Mes besoins publiés</span>
+                  <h2>Demandes de besoin</h2>
                 </div>
-                <div class="announcement-card__category">
-                  {{ annonce.categorieDonation.nom }}
-                </div>
-                <h2>{{ annonce.titre }}</h2>
-                <p>{{ annonce.description }}</p>
-                <div class="announcement-card__quantity">
-                  <strong>{{ annonce.quantiteEstimee }}</strong>
-                  <span>{{ annonce.unite }}</span>
-                </div>
-                <div class="announcement-card__meta">
-                  <span>⌖ {{ annonce.adresse }}</span>
-                  <span>
-                    ◷ {{ dateCourte(annonce.dateExpiration) }}
-                    <i class="risk-chip" [attr.data-level]="niveauUrgenceTemps(annonce.dateExpiration)">
-                      {{ tempsRestant(annonce.dateExpiration) }}
-                    </i>
-                  </span>
-                </div>
-                @if (estAuteur(annonce) || utilisateur()?.role === 'ADMIN') {
-                  <div class="announcement-card__actions">
-                    @if (estAuteur(annonce)) {
-                      <button class="action-btn" type="button" (click)="ouvrirEditionAnnonce(annonce)">✎ Modifier</button>
-                    }
-                    <button class="action-btn action-btn--danger" type="button" (click)="annulerAnnonce(annonce)">✕ Supprimer</button>
-                  </div>
-                }
-                <footer>
-                  <span class="person-chip">
-                    <i>{{ initiales(annonce.auteur) }}</i>
-                    {{ annonce.auteur.prenom }} {{ annonce.auteur.nom }}
-                  </span>
-                  <span>{{ annonce.auteur.role }}</span>
-                </footer>
-              </article>
-            } @empty {
-              <div class="empty-page">
-                <span>⌕</span>
-                <h2>Aucune annonce trouvée</h2>
-                <p>Modifiez les filtres ou publiez une nouvelle annonce.</p>
+                <button class="button button--primary" type="button" (click)="ouvrirFormulaireAnnonce()">
+                  + Nouvelle demande
+                </button>
               </div>
-            }
-          </section>
+              @if (chargementAnnonces()) {
+                <div class="donation-grid">
+                  @for (i of [1,2,3]; track i) {
+                    <div class="skeleton-card">
+                      <div class="skeleton skeleton--line skeleton--short"></div>
+                      <div class="skeleton skeleton--line"></div>
+                      <div class="skeleton skeleton--line skeleton--medium"></div>
+                    </div>
+                  }
+                </div>
+              } @else if (!mesAnnonces().length) {
+                <p class="empty-hint">Vous n'avez pas encore publié de demande de besoin.</p>
+              }
+              <div class="donation-grid">
+                @for (annonce of mesAnnonces(); track annonce._id) {
+                  <article
+                    class="donation-card"
+                    [class.donation-card--critique]="niveauUrgenceTemps(annonce.dateExpiration) === 'CRITIQUE'"
+                    [class.donation-card--attention]="niveauUrgenceTemps(annonce.dateExpiration) === 'ATTENTION'"
+                  >
+                    @if (niveauUrgenceTemps(annonce.dateExpiration) === 'CRITIQUE') {
+                      <div class="donation-card__expiry-alert">Expire très bientôt !</div>
+                    }
+                    <div class="donation-card__header">
+                      <span class="badge badge--annonce-DEMANDE">Besoin</span>
+                      <span class="badge badge--urgence-{{ annonce.urgence }}">{{ annonce.urgence }}</span>
+                    </div>
+                    <h3>{{ annonce.titre }}</h3>
+                    <p class="donation-card__meta">{{ annonce.quantiteEstimee }} {{ annonce.unite }} &middot; {{ annonce.categorieDonation.nom }}</p>
+                    @if (annonce.adresse) {
+                      <p class="donation-card__address">📍 {{ annonce.adresse }}</p>
+                    }
+                    <p class="donation-card__deadline">
+                      Expire : {{ dateCourte(annonce.dateExpiration) }}
+                      <span class="risk-chip" [attr.data-level]="niveauUrgenceTemps(annonce.dateExpiration)">{{ tempsRestant(annonce.dateExpiration) }}</span>
+                    </p>
+                    <div class="donation-card__actions">
+                      <button class="button button--sm button--secondary" type="button" (click)="ouvrirEditionAnnonce(annonce)">Modifier</button>
+                      <button class="button button--sm button--danger" type="button" (click)="annulerAnnonce(annonce)">Supprimer</button>
+                    </div>
+                  </article>
+                }
+              </div>
+            </section>
+
+          } @else {
+
+            <!-- ======= VUE FOURNISSEUR / ADMIN ======= -->
+            <section class="inv-dashboard">
+              <article class="inv-kpi">
+                <span class="inv-kpi__value">{{ statsAnnonces().total }}</span>
+                <span class="inv-kpi__label">Mes annonces</span>
+              </article>
+              <article class="inv-kpi inv-kpi--green">
+                <span class="inv-kpi__value">{{ statsAnnonces().actives }}</span>
+                <span class="inv-kpi__label">Annonces actives</span>
+              </article>
+              <article class="inv-kpi inv-kpi--blue">
+                <span class="inv-kpi__value">{{ statsAnnonces().offres }}</span>
+                <span class="inv-kpi__label">Offres publiées</span>
+              </article>
+              <article class="inv-kpi inv-kpi--orange">
+                <span class="inv-kpi__value">{{ statsAnnonces().expirantBientot }}</span>
+                <span class="inv-kpi__label">Expirent dans 24h</span>
+              </article>
+            </section>
+
+            <section class="panel">
+              <div class="panel__header">
+                <div>
+                  <span class="eyebrow">Offres à prix réduit publiées</span>
+                  <h2>Mes offres promotionnelles</h2>
+                </div>
+                @if (peutPublier()) {
+                  <button class="button button--primary" type="button" (click)="ouvrirFormulaireAnnonce()">
+                    {{ utilisateur()?.role === "FOURNISSEUR" ? "+ Nouvelle offre" : "+ Nouvelle demande" }}
+                  </button>
+                }
+              </div>
+
+              <div class="inv-filters">
+                <input
+                  class="inv-search"
+                  type="search"
+                  placeholder="Rechercher une annonce..."
+                  [ngModel]="rechercheAnnonce()"
+                  (ngModelChange)="rechercheAnnonce.set($event)"
+                  name="rechercheAnnonce"
+                />
+                <div class="inv-filters__selects">
+                  <select [ngModel]="filtreCategorie()" (ngModelChange)="filtreCategorie.set($event)" name="filtreCatAnnonce">
+                    <option value="TOUS">Catégorie</option>
+                    @for (cat of categories(); track cat._id) {
+                      <option [value]="cat._id">{{ cat.nom }}</option>
+                    }
+                  </select>
+                  <select [ngModel]="triAnnonce()" (ngModelChange)="triAnnonce.set($any($event))" name="triAnnonce">
+                    <option value="RECENT">Plus récentes</option>
+                    <option value="URGENCE">Urgence</option>
+                    <option value="EXPIRATION">Expiration proche</option>
+                  </select>
+                </div>
+              </div>
+
+              <p class="inv-results-count">{{ annoncesFiltrees().length }} résultat(s)</p>
+
+              @if (!annoncesFiltrees().length) {
+                <p class="empty-hint">Vous n'avez pas encore publié d'annonce.</p>
+              }
+
+              <div class="donation-grid">
+                @for (annonce of annoncesFiltrees(); track annonce._id) {
+                  <article
+                    class="donation-card"
+                    [class.donation-card--critique]="niveauUrgenceTemps(annonce.dateExpiration) === 'CRITIQUE'"
+                    [class.donation-card--attention]="niveauUrgenceTemps(annonce.dateExpiration) === 'ATTENTION'"
+                  >
+                    @if (niveauUrgenceTemps(annonce.dateExpiration) === 'CRITIQUE') {
+                      <div class="donation-card__expiry-alert">Expire très bientôt !</div>
+                    }
+                    <div class="donation-card__header">
+                      <span class="badge badge--annonce-{{ annonce.type }}">
+                        {{ annonce.type === "OFFRE" ? "Surplus" : "Besoin" }}
+                      </span>
+                      <span class="badge badge--urgence-{{ annonce.urgence }}">{{ annonce.urgence }}</span>
+                    </div>
+                    <h3>{{ annonce.titre }}</h3>
+                    <p class="donation-card__meta">{{ annonce.quantiteEstimee }} {{ annonce.unite }} &middot; {{ annonce.categorieDonation.nom }}</p>
+                    @if (annonce.type === "OFFRE" && annonce.prixPromo != null) {
+                      <p class="annonce-prix">{{ annonce.prixPromo | number:'1.2-2' }} TND <span class="annonce-prix__label">prix promo</span></p>
+                    }
+                    @if (annonce.adresse) {
+                      <p class="donation-card__address">📍 {{ annonce.adresse }}</p>
+                    }
+                    <p class="donation-card__deadline">
+                      Expire : {{ dateCourte(annonce.dateExpiration) }}
+                      <span class="risk-chip" [attr.data-level]="niveauUrgenceTemps(annonce.dateExpiration)">{{ tempsRestant(annonce.dateExpiration) }}</span>
+                    </p>
+                    <div class="donation-card__actions">
+                      <button class="button button--sm button--secondary" type="button" (click)="ouvrirEditionAnnonce(annonce)">Modifier</button>
+                      <button class="button button--sm button--danger" type="button" (click)="annulerAnnonce(annonce)">Supprimer</button>
+                    </div>
+                  </article>
+                }
+              </div>
+            </section>
+
+          }
         }
 
         @case ("matching") {
-          <section class="matching-summary">
-            <div>
+
+          <!-- Bandeau algorithme -->
+          <section class="matching-hero">
+            <div class="matching-hero__left">
               <span class="eyebrow">Algorithme de compatibilité</span>
-              <h2>{{ suggestions().length }} suggestion(s) pour vos annonces</h2>
-              <p>Catégorie 40% · Distance 30% · Quantité 20% · Urgence 10%</p>
+              <h2>{{ suggestions().length }} correspondance{{ suggestions().length > 1 ? 's' : '' }} trouvée{{ suggestions().length > 1 ? 's' : '' }}</h2>
+              <div class="matching-algo-pills">
+                <span class="algo-pill algo-pill--cat">Catégorie 40%</span>
+                <span class="algo-pill algo-pill--dist">Distance 30%</span>
+                <span class="algo-pill algo-pill--qty">Quantité 20%</span>
+                <span class="algo-pill algo-pill--urg">Urgence 10%</span>
+              </div>
             </div>
-            <div class="matching-summary__score">
-              <strong>{{ suggestions().length ? pourcentage(suggestions()[0].score) : "—" }}</strong>
-              <small>meilleur score</small>
+            <div class="matching-hero__score-ring">
+              <svg viewBox="0 0 80 80" class="score-ring-svg">
+                <circle cx="40" cy="40" r="34" fill="none" stroke="#d8ead0" stroke-width="7"/>
+                <circle cx="40" cy="40" r="34" fill="none" stroke="#1f8050" stroke-width="7"
+                  [attr.stroke-dasharray]="(suggestions().length ? (suggestions()[0].score * 213.6).toFixed(0) : 0) + ' 213.6'"
+                  stroke-dashoffset="53.4" stroke-linecap="round"/>
+              </svg>
+              <div class="score-ring-label">
+                <strong>{{ suggestions().length ? pourcentage(suggestions()[0].score) : '—' }}</strong>
+                <small>meilleur</small>
+              </div>
             </div>
           </section>
 
           <div class="matching-layout">
-            <section>
+            <section class="matching-cards-col">
               <div class="section-title">
                 <div>
-                  <span class="eyebrow">À examiner</span>
-                  <h2>Suggestions automatiques</h2>
+                  <span class="eyebrow">Propositions automatiques</span>
+                  <h2>Suggestions</h2>
                 </div>
+                <span class="count-badge">{{ suggestions().length }}</span>
               </div>
+
               <div class="suggestion-list">
-                @for (suggestion of suggestions(); track suggestion.monAnnonce.id + suggestion.annonceCompatible.id) {
-                  <article class="suggestion-card">
-                    <div class="suggestion-card__score">
+                @for (suggestion of suggestions(); track suggestion.donation._id + suggestion.demande._id) {
+                  <article class="suggestion-card-v2">
+
+                    <!-- Score badge -->
+                    <div class="scv2__score" [class.scv2__score--high]="suggestion.score >= 0.7" [class.scv2__score--mid]="suggestion.score >= 0.4 && suggestion.score < 0.7" [class.scv2__score--low]="suggestion.score < 0.4">
                       <strong>{{ pourcentage(suggestion.score) }}</strong>
                       <small>compatible</small>
                     </div>
-                    <div class="suggestion-card__pair">
-                      <span>
-                        <small>Votre {{ suggestion.monAnnonce.type === "OFFRE" ? "offre" : "demande" }}</small>
-                        <strong>{{ suggestion.monAnnonce.titre }}</strong>
-                      </span>
-                      <i>↔</i>
-                      <span>
-                        <small>{{ suggestion.annonceCompatible.auteur.role }}</small>
-                        <strong>{{ suggestion.annonceCompatible.titre }}</strong>
-                      </span>
+
+                    <!-- Pair -->
+                    <div class="scv2__pair">
+                      <div class="scv2__side scv2__side--don">
+                        <span class="scv2__side-label">Don disponible</span>
+                        <strong>{{ suggestion.donation.titre }}</strong>
+                        <p>{{ suggestion.donation.quantiteEstimee }} {{ suggestion.donation.unite }} · {{ suggestion.donation.categorieDonation.nom }}</p>
+                        <span class="badge badge--urgence-{{ suggestion.donation.urgence }}">{{ suggestion.donation.urgence }}</span>
+                      </div>
+                      <div class="scv2__arrow">↔</div>
+                      <div class="scv2__side scv2__side--besoin">
+                        <span class="scv2__side-label">Besoin ONG</span>
+                        <strong>{{ suggestion.demande.titre }}</strong>
+                        <p>{{ suggestion.demande.quantiteEstimee }} {{ suggestion.demande.unite }} · {{ suggestion.demande.categorieDonation.nom }}</p>
+                        <span class="badge badge--urgence-{{ suggestion.demande.urgence }}">{{ suggestion.demande.urgence }}</span>
+                      </div>
                     </div>
-                    <div class="criteria">
-                      <span>Catégorie <b>{{ pourcentage(suggestion.criteres["categorie"]) }}</b></span>
-                      <span>Distance <b>{{ suggestion.distanceKm }} km</b></span>
-                      <span>Quantité <b>{{ pourcentage(suggestion.criteres["quantite"]) }}</b></span>
-                      <span>Urgence <b>{{ pourcentage(suggestion.criteres["urgence"]) }}</b></span>
+
+                    <!-- Critères -->
+                    <div class="scv2__criteria">
+                      <div class="scv2__crit">
+                        <span>Catégorie</span>
+                        <div class="scv2__bar"><div class="scv2__bar-fill scv2__bar-fill--cat" [style.width.%]="suggestion.criteres['categorie'] * 100"></div></div>
+                        <b>{{ pourcentage(suggestion.criteres["categorie"]) }}</b>
+                      </div>
+                      <div class="scv2__crit">
+                        <span>Distance</span>
+                        <div class="scv2__bar"><div class="scv2__bar-fill scv2__bar-fill--dist" [style.width.%]="(1 - Math.min(suggestion.distanceKm / 50, 1)) * 100"></div></div>
+                        <b>{{ suggestion.distanceKm }} km</b>
+                      </div>
+                      <div class="scv2__crit">
+                        <span>Quantité</span>
+                        <div class="scv2__bar"><div class="scv2__bar-fill scv2__bar-fill--qty" [style.width.%]="suggestion.criteres['quantite'] * 100"></div></div>
+                        <b>{{ pourcentage(suggestion.criteres["quantite"]) }}</b>
+                      </div>
                     </div>
-                    <div class="matching-explanation">
-                      <p>
-                        {{ explicationMatching(suggestion).categorie }} ·
-                        {{ explicationMatching(suggestion).distance }} ·
-                        {{ explicationMatching(suggestion).quantite }}
-                      </p>
+
+                    <!-- Explication + action -->
+                    <div class="scv2__footer">
                       <span class="risk-chip" [attr.data-level]="explicationMatching(suggestion).niveau">
                         {{ explicationMatching(suggestion).recommandation }}
                       </span>
+                      <button class="button button--primary scv2__accept-btn" type="button" (click)="accepterSuggestion(suggestion)">
+                        ✓ Confirmer le matching
+                      </button>
                     </div>
-                    <button class="button button--primary" type="button" (click)="accepterSuggestion(suggestion)">
-                      Accepter le matching
-                    </button>
+
                   </article>
                 } @empty {
                   <div class="empty-page empty-page--small">
                     <span>◇</span>
-                    <h2>Aucune suggestion active</h2>
-                    <p>Publiez une annonce ou restaurez les données de démonstration.</p>
+                    <h2>Aucune suggestion</h2>
+                    <p>
+                      @if (utilisateur()?.role === 'FOURNISSEUR') {
+                        Créez un don dans l'Inventaire pour déclencher des suggestions.
+                      } @else {
+                        Publiez une demande de besoin dans Annonces pour voir les correspondances.
+                      }
+                    </p>
                   </div>
                 }
               </div>
@@ -737,28 +931,38 @@
               <div class="panel__header">
                 <div>
                   <span class="eyebrow">Historique</span>
-                  <h2>Mes matchings</h2>
+                  <h2>Matchings confirmés</h2>
                 </div>
+                <span class="count-badge">{{ matchings().length }}</span>
               </div>
               @for (matching of matchings(); track matching._id) {
                 <div class="matching-history__item">
-                  <div>
-                    <strong>{{ matching.offre.titre }}</strong>
-                    <span>↔</span>
-                    <strong>{{ matching.demande.titre }}</strong>
+                  <div class="mh__pair">
+                    <span class="mh__don">{{ matching.donation.titre }}</span>
+                    <i>↔</i>
+                    <span class="mh__besoin">{{ matching.demande.titre }}</span>
                   </div>
-                  <p>{{ pourcentage(matching.score) }} · {{ matching.distanceKm }} km</p>
-                  <footer>
+                  <div class="mh__meta">
+                    <span>{{ pourcentage(matching.score) }}</span>
+                    <span>{{ matching.distanceKm }} km</span>
+                  </div>
+                  <footer class="mh__footer">
                     <i class="status-pill" [attr.data-status]="matching.statut">{{
                       libelleStatut(matching.statut)
                     }}</i>
                     @if (matching.statut === "ACCEPTE") {
-                      <button type="button" (click)="refuserMatching(matching)">Refuser</button>
+                      <button class="button button--sm button--danger" type="button" (click)="refuserMatching(matching)">
+                        Annuler
+                      </button>
                     }
                   </footer>
                 </div>
               } @empty {
-                <p class="empty-inline">Aucun matching enregistré.</p>
+                <div class="empty-page empty-page--small">
+                  <span>◇</span>
+                  <h2>Aucun matching</h2>
+                  <p>Acceptez une suggestion pour créer un matching.</p>
+                </div>
               }
             </aside>
           </div>
@@ -786,7 +990,12 @@
                     </strong>
                     <small>{{ conversation.annonce.titre }}</small>
                   </span>
-                  <i>{{ dateCourte(conversation.dernierMessageAt) }}</i>
+                  <span class="conv-item-right">
+                    <i>{{ dateCourte(conversation.dernierMessageAt) }}</i>
+                    @if (conversation.nbrNonLus) {
+                      <span class="conv-unread-dot">{{ conversation.nbrNonLus }}</span>
+                    }
+                  </span>
                 </button>
               } @empty {
                 <div class="empty-page empty-page--small">
@@ -800,14 +1009,21 @@
             <section class="chat-panel">
               @if (conversationSelectionnee(); as conversation) {
                 <header class="chat-panel__header">
-                  <span class="profile-avatar">{{ initiales(autreParticipant(conversation)) }}</span>
-                  <span>
+                  <span class="chat-avatar-wrap">
+                    <span class="profile-avatar">{{ initiales(autreParticipant(conversation)) }}</span>
+                    <span class="chat-online-dot"></span>
+                  </span>
+                  <span class="chat-panel__header-info">
                     <strong>
                       {{ autreParticipant(conversation)?.prenom }}
                       {{ autreParticipant(conversation)?.nom }}
                     </strong>
-                    <small>{{ conversation.annonce.titre }} · {{ conversation.annonce.type }}</small>
+                    <small>
+                      <span class="badge badge--annonce-{{ conversation.annonce.type }}">{{ conversation.annonce.type }}</span>
+                      {{ conversation.annonce.titre }}
+                    </small>
                   </span>
+                  <span class="chat-msg-count">{{ messages().length }} msg</span>
                 </header>
                 <div class="message-stream">
                   @for (message of messages(); track message._id) {
@@ -819,25 +1035,29 @@
                       <small>{{ message.expediteur.prenom }} · {{ dateCourte(message.createdAt) }}</small>
                     </div>
                   } @empty {
-                    <div class="chat-empty">Commencez la conversation.</div>
+                    <div class="chat-empty">
+                      <span>✉</span>
+                      <p>Aucun message — lancez la conversation !</p>
+                    </div>
                   }
                 </div>
                 <form class="composer" (ngSubmit)="envoyerMessage()">
                   <input
                     name="message"
                     placeholder="Écrire un message…"
+                    autocomplete="off"
                     [ngModel]="nouveauMessage()"
                     (ngModelChange)="nouveauMessage.set($event)"
                   />
                   <button class="button button--primary" type="submit" [disabled]="!nouveauMessage().trim()">
-                    Envoyer
+                    ↑ Envoyer
                   </button>
                 </form>
               } @else {
-                <div class="empty-page">
-                  <span>◫</span>
-                  <h2>Sélectionnez une conversation</h2>
-                  <p>Les messages apparaîtront ici.</p>
+                <div class="empty-page chat-empty-select">
+                  <span class="chat-empty-select__icon">◫</span>
+                  <h2>Vos messages</h2>
+                  <p>Sélectionnez une conversation à gauche pour afficher les échanges.</p>
                 </div>
               }
             </section>
@@ -845,6 +1065,35 @@
         }
 
         @case ("logistique") {
+
+          @if (utilisateur()?.role === 'TRANSPORTEUR') {
+            <div class="transporteur-hero">
+              <div class="transporteur-hero__left">
+                <span class="eyebrow">Espace Transporteur</span>
+                <h2>Mes missions du jour</h2>
+                <p>Consultez vos collectes assignées, mettez à jour les statuts et optimisez votre tournée grâce à l'IA.</p>
+              </div>
+              <div class="transporteur-hero__stats">
+                <div class="t-stat">
+                  <strong>{{ dashboardLogistique().kpis.collectesActives }}</strong>
+                  <span>En cours</span>
+                </div>
+                <div class="t-stat">
+                  <strong>{{ dashboardLogistique().parStatut["EN_ROUTE"] || 0 }}</strong>
+                  <span>En route</span>
+                </div>
+                <div class="t-stat">
+                  <strong>{{ dashboardLogistique().kpis.livraisonsTerminees }}</strong>
+                  <span>Livrées</span>
+                </div>
+                <div class="t-stat">
+                  <strong>{{ dashboardLogistique().kpis.tauxPonctualite }}%</strong>
+                  <span>Ponctualité</span>
+                </div>
+              </div>
+            </div>
+          }
+
           <section class="metric-grid">
             <article class="metric-card">
               <span class="metric-card__icon metric-card__icon--green">↗</span>
@@ -1175,8 +1424,15 @@
           <section class="panel">
             <div class="panel__header">
               <div>
-                <span class="eyebrow">{{ utilisateur()?.role === "FOURNISSEUR" ? "Mes dons" : "Tous les dons" }}</span>
-                <h2>Inventaire alimentaire</h2>
+                <span class="eyebrow">
+                  @if (utilisateur()?.role === "FOURNISSEUR") { Mes dons }
+                  @else if (utilisateur()?.role === "ONG") { Dons des fournisseurs }
+                  @else { Tous les dons }
+                </span>
+                <h2>
+                  @if (utilisateur()?.role === "ONG") { Dons disponibles pour le matching }
+                  @else { Inventaire alimentaire }
+                </h2>
               </div>
               @if (utilisateur()?.role === "FOURNISSEUR") {
                 <button class="button button--primary" type="button" (click)="ouvrirFormulaireDonation()">
@@ -1184,6 +1440,16 @@
                 </button>
               }
             </div>
+
+            @if (utilisateur()?.role === 'ONG') {
+              <div class="ong-inv-info">
+                <div class="ong-inv-info__icon">◇</div>
+                <div>
+                  <strong>Comment ça marche ?</strong>
+                  <p>Consultez les dons disponibles ci-dessous. L'algorithme de <button type="button" (click)="naviguer('matching')">Matching →</button> les connecte automatiquement à vos demandes de besoin publiées dans Annonces. Vous n'avez rien à faire ici — le matching gère tout.</p>
+                </div>
+              </div>
+            }
 
             <div class="inv-filters">
               <input
@@ -1222,21 +1488,52 @@
               </div>
             </div>
 
-            <p class="inv-results-count">{{ donationsFiltrees().length }} résultat(s)</p>
+            @let donsAffiches = utilisateur()?.role === 'ONG' ? donationsOng() : donationsFiltrees();
 
-            @if (!donationsFiltrees().length) {
-              <p class="empty-hint">Aucun don trouvé pour ces filtres.</p>
+            @if (utilisateur()?.role === 'ONG') {
+              <div class="inv-ong-legend">
+                <span class="inv-legend-dot inv-legend-dot--green"></span> Disponible
+                <span class="inv-legend-dot inv-legend-dot--blue"></span> Réservé pour moi
+                <span class="inv-legend-dot inv-legend-dot--orange"></span> En cours de collecte
+              </div>
+            }
+
+            <p class="inv-results-count">{{ donsAffiches.length }} résultat(s)</p>
+
+            @if (!donsAffiches.length) {
+              <p class="empty-hint">Aucun don disponible pour le moment.</p>
+            }
+
+            @if (chargementInventaire()) {
+              <div class="donation-grid">
+                @for (i of [1,2,3,4,5,6]; track i) {
+                  <div class="skeleton-card">
+                    <div class="skeleton skeleton--line skeleton--short"></div>
+                    <div class="skeleton skeleton--line"></div>
+                    <div class="skeleton skeleton--line skeleton--medium"></div>
+                    <div class="skeleton skeleton--line skeleton--short"></div>
+                  </div>
+                }
+              </div>
             }
 
             <div class="donation-grid">
-              @for (don of donationsFiltrees(); track don._id) {
+              @for (don of donsAffiches; track don._id) {
                 <article
                   class="donation-card"
                   [class.donation-card--critique]="niveauExpiration(don) === 'CRITIQUE'"
                   [class.donation-card--attention]="niveauExpiration(don) === 'ATTENTION'"
+                  [class.donation-card--reserve]="don.statut === 'RESERVE'"
+                  [class.donation-card--en-collecte]="don.statut === 'EN_COLLECTE'"
                   (click)="ouvrirDetailDonation(don)"
                   style="cursor:pointer"
                 >
+                  @if (don.statut === 'RESERVE') {
+                    <div class="don-statut-banner don-statut-banner--reserve">Réservé pour vous — matching en cours</div>
+                  }
+                  @if (don.statut === 'EN_COLLECTE') {
+                    <div class="don-statut-banner don-statut-banner--collecte">En cours de collecte par le transporteur</div>
+                  }
                   @if (don.images?.[0]) {
                     <img class="donation-card__img" [src]="don.images![0]" [alt]="don.titre" />
                   }
@@ -1247,7 +1544,7 @@
                   }
                   <div class="donation-card__header">
                     <span class="badge badge--urgence-{{ don.urgence }}">{{ don.urgence }}</span>
-                    <span class="badge">{{ libelleStatutDon(don.statut || "CREE") }}</span>
+                    <span class="badge badge--statut-{{ don.statut }}">{{ libelleStatutDon(don.statut || "CREE") }}</span>
                   </div>
                   <h3>{{ don.titre }}</h3>
                   <p class="donation-card__meta">
@@ -1273,7 +1570,17 @@
                         Supprimer
                       </button>
                     }
-                    @if (["ADMIN","ONG","TRANSPORTEUR"].includes(utilisateur()?.role || "")) {
+                    @if (utilisateur()?.role === 'ONG') {
+                      @if (['CREE','VALIDE'].includes(don.statut || '')) {
+                        <button class="button button--sm button--secondary" type="button" (click)="naviguer('matching')">
+                          Voir le matching →
+                        </button>
+                      }
+                      @if (don.statut === 'RESERVE') {
+                        <span class="inv-ong-reserved-tag">Réservé pour vous</span>
+                      }
+                    }
+                    @if (["ADMIN","TRANSPORTEUR"].includes(utilisateur()?.role || "")) {
                       @for (statut of prochainStatutsDon(don); track statut) {
                         <button class="button button--sm button--primary" type="button" (click)="changerStatutDonation(don, statut)">
                           → {{ libelleStatutDon(statut) }}
@@ -1284,6 +1591,31 @@
                 </article>
               }
             </div>
+
+            @if (totalPagesInventaire() > 1) {
+              <nav class="pagination">
+                <button
+                  class="pagination__btn"
+                  type="button"
+                  [disabled]="pageInventaire() === 1"
+                  (click)="changerPageInventaire(pageInventaire() - 1)"
+                >‹ Précédent</button>
+                @for (p of pagesArray(totalPagesInventaire()); track p) {
+                  <button
+                    class="pagination__btn"
+                    [class.pagination__btn--active]="pageInventaire() === p"
+                    type="button"
+                    (click)="changerPageInventaire(p)"
+                  >{{ p }}</button>
+                }
+                <button
+                  class="pagination__btn"
+                  type="button"
+                  [disabled]="pageInventaire() === totalPagesInventaire()"
+                  (click)="changerPageInventaire(pageInventaire() + 1)"
+                >Suivant ›</button>
+              </nav>
+            }
           </section>
         }
 
@@ -1365,18 +1697,30 @@
               <div class="form-grid">
                 <label>
                   Prénom
-                  <input [value]="utilisateur()?.prenom" disabled />
+                  <input
+                    name="profilPrenom"
+                    [ngModel]="profilPrenom()"
+                    (ngModelChange)="profilPrenom.set($event)"
+                    placeholder="Votre prénom"
+                  />
                 </label>
                 <label>
                   Nom
-                  <input [value]="utilisateur()?.nom" disabled />
+                  <input
+                    name="profilNom"
+                    [ngModel]="profilNom()"
+                    (ngModelChange)="profilNom.set($event)"
+                    placeholder="Votre nom"
+                  />
                 </label>
                 <label>
                   Téléphone
                   <input
                     name="telephone"
+                    type="tel"
                     [ngModel]="profilTelephone()"
                     (ngModelChange)="profilTelephone.set($event)"
+                    placeholder="+216 xx xxx xxx"
                   />
                 </label>
                 <label class="form-grid__wide">
@@ -1385,10 +1729,56 @@
                     name="adresse"
                     [ngModel]="profilAdresse()"
                     (ngModelChange)="profilAdresse.set($event)"
+                    placeholder="Votre adresse complète"
                   />
                 </label>
               </div>
-              <footer><button class="button button--primary" type="submit">Enregistrer</button></footer>
+              <footer><button class="button button--primary" type="submit">Enregistrer les informations</button></footer>
+            </form>
+
+            <form class="panel profile-form" (ngSubmit)="changerMotDePasse()">
+              <div class="panel__header">
+                <div><span class="eyebrow">Sécurité</span><h2>Changer le mot de passe</h2></div>
+              </div>
+              <div class="form-grid">
+                <label class="form-grid__wide">
+                  Mot de passe actuel
+                  <input
+                    name="ancienMdp"
+                    type="password"
+                    [ngModel]="ancienMotDePasse()"
+                    (ngModelChange)="ancienMotDePasse.set($event)"
+                    placeholder="Votre mot de passe actuel"
+                    autocomplete="current-password"
+                  />
+                </label>
+                <label>
+                  Nouveau mot de passe
+                  <input
+                    name="nouveauMdp"
+                    type="password"
+                    [ngModel]="nouveauMotDePasse()"
+                    (ngModelChange)="nouveauMotDePasse.set($event)"
+                    placeholder="8 caractères minimum"
+                    autocomplete="new-password"
+                  />
+                </label>
+                <label>
+                  Confirmer le nouveau
+                  <input
+                    name="confirmerMdp"
+                    type="password"
+                    [ngModel]="confirmerMotDePasse()"
+                    (ngModelChange)="confirmerMotDePasse.set($event)"
+                    placeholder="Répéter le nouveau mot de passe"
+                    autocomplete="new-password"
+                  />
+                </label>
+              </div>
+              @if (erreurMotDePasse()) {
+                <p class="form-message form-message--error">{{ erreurMotDePasse() }}</p>
+              }
+              <footer><button class="button button--primary" type="submit">Modifier le mot de passe</button></footer>
             </form>
           </section>
         }
@@ -1446,9 +1836,13 @@
     <form class="modal modal--wide" (ngSubmit)="annonceEnEdition() ? modifierAnnonce() : creerAnnonce()">
       <button class="modal__close" type="button" (click)="fermerFormulaireAnnonce()">×</button>
       <span class="eyebrow">
-        {{ annonceEnEdition() ? "Modifier l'annonce" : "Nouvelle " + (utilisateur()?.role === "FOURNISSEUR" ? "offre" : "demande") }}
+        {{ utilisateur()?.role === "FOURNISSEUR" ? "Offre promotionnelle" : "Demande de besoin" }}
       </span>
-      <h2>{{ annonceEnEdition() ? "Modifier l'annonce" : "Publier une annonce" }}</h2>
+      <h2>
+        {{ annonceEnEdition()
+          ? (utilisateur()?.role === "FOURNISSEUR" ? "Modifier l'offre" : "Modifier la demande")
+          : (utilisateur()?.role === "FOURNISSEUR" ? "Nouvelle offre à prix réduit" : "Publier un besoin") }}
+      </h2>
       <div class="form-grid">
         <label class="form-grid__wide">
           Titre
@@ -1456,9 +1850,14 @@
             name="titre"
             [ngModel]="annonceForm.titre"
             (ngModelChange)="annonceForm.titre = $event; onAnnonceTexteChange()"
+            (blur)="validerChampAnnonce('titre')"
+            [class.input--error]="erreursAnnonce.titre"
             required
             maxlength="180"
           />
+          @if (erreursAnnonce.titre) {
+            <span class="field-error">{{ erreursAnnonce.titre }}</span>
+          }
         </label>
         <label class="form-grid__wide">
           Description
@@ -1466,8 +1865,13 @@
             name="description"
             [ngModel]="annonceForm.description"
             (ngModelChange)="annonceForm.description = $event; onAnnonceTexteChange()"
+            (blur)="validerChampAnnonce('description')"
+            [class.input--error]="erreursAnnonce.description"
             required
           ></textarea>
+          @if (erreursAnnonce.description) {
+            <span class="field-error">{{ erreursAnnonce.description }}</span>
+          }
         </label>
         @if (suggestionCategorieIA(); as suggestion) {
           <div class="form-grid__wide ai-suggestion-chip">
@@ -1498,7 +1902,18 @@
         </label>
         <label>
           Quantité
-          <input name="quantite" type="number" min="0.01" [(ngModel)]="annonceForm.quantiteEstimee" required />
+          <input
+            name="quantite"
+            type="number"
+            min="0.01"
+            [(ngModel)]="annonceForm.quantiteEstimee"
+            (blur)="validerChampAnnonce('quantiteEstimee')"
+            [class.input--error]="erreursAnnonce.quantiteEstimee"
+            required
+          />
+          @if (erreursAnnonce.quantiteEstimee) {
+            <span class="field-error">{{ erreursAnnonce.quantiteEstimee }}</span>
+          }
         </label>
         <label>
           Unité
@@ -1522,8 +1937,26 @@
         </label>
         <label class="form-grid__wide">
           Date d'expiration
-          <input name="expiration" type="datetime-local" [(ngModel)]="annonceForm.dateExpiration" required />
+          <input
+            name="expiration"
+            type="datetime-local"
+            [(ngModel)]="annonceForm.dateExpiration"
+            (blur)="validerChampAnnonce('dateExpiration')"
+            [class.input--error]="erreursAnnonce.dateExpiration"
+            required
+          />
+          @if (erreursAnnonce.dateExpiration) {
+            <span class="field-error">{{ erreursAnnonce.dateExpiration }}</span>
+          }
         </label>
+        @if (utilisateur()?.role === "FOURNISSEUR") {
+          <label class="form-grid__wide">
+            Prix promotionnel (TND) <span class="form-hint">— optionnel, laisser vide si don gratuit</span>
+            <input name="prixPromo" type="number" min="0" step="0.01" placeholder="ex: 2.50"
+              [ngModel]="annonceForm.prixPromo"
+              (ngModelChange)="annonceForm.prixPromo = $event ? +$event : null" />
+          </label>
+        }
       </div>
       <footer class="modal__footer">
         <button class="button" type="button" (click)="fermerFormulaireAnnonce()">Annuler</button>
@@ -1894,5 +2327,18 @@
 
   @if (chargement()) {
     <div class="loading-bar"><i></i></div>
+  }
+
+  @if (confirmDialogue(); as dlg) {
+    <div class="modal-backdrop" (click)="annulerConfirmation()"></div>
+    <div class="modal modal--confirm" role="alertdialog" aria-modal="true">
+      <div class="confirm-icon">⚠</div>
+      <h2>{{ dlg.titre }}</h2>
+      <p>{{ dlg.corps }}</p>
+      <footer class="modal__footer modal__footer--center">
+        <button class="button" type="button" (click)="annulerConfirmation()">Annuler</button>
+        <button class="button button--danger" type="button" (click)="executerConfirmation()">Supprimer</button>
+      </footer>
+    </div>
   }
 }

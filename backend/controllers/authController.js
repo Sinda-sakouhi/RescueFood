@@ -159,6 +159,34 @@ async function updateProfile(request, response, next) {
   }
 }
 
+async function changerMotDePasse(request, response, next) {
+  try {
+    const { ancien, nouveau } = request.body;
+
+    if (!ancien || !nouveau) {
+      return response.status(400).json({ message: 'Ancien et nouveau mot de passe requis' });
+    }
+
+    if (nouveau.length < 8) {
+      return response.status(400).json({ message: 'Le nouveau mot de passe doit contenir au moins 8 caractères' });
+    }
+
+    const user = await require('../models/User').findById(request.user._id).select('+motDePasse');
+    const valide = user && (await user.comparerMotDePasse(ancien));
+
+    if (!valide) {
+      return response.status(401).json({ message: 'Mot de passe actuel incorrect' });
+    }
+
+    user.motDePasse = nouveau;
+    await user.save();
+
+    return response.json({ message: 'Mot de passe modifié avec succès' });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 async function logout(request, response, next) {
   try {
     request.user.tokenVersion += 1;
@@ -177,5 +205,6 @@ module.exports = {
   login,
   me,
   updateProfile,
+  changerMotDePasse,
   logout
 };

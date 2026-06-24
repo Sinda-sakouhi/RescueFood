@@ -5,6 +5,7 @@ const {
   login,
   me,
   updateProfile,
+  changerMotDePasse,
   logout
 } = require('../controllers/authController');
 const { authenticate } = require('../middleware/auth');
@@ -25,6 +26,7 @@ router.post('/register', register);
 router.post('/login', loginLimiter, login);
 router.get('/me', authenticate, me);
 router.patch('/me', authenticate, updateProfile);
+router.post('/changer-mot-de-passe', authenticate, changerMotDePasse);
 router.post('/logout', authenticate, logout);
 
 module.exports = router;

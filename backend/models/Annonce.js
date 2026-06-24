@@ -91,6 +91,11 @@ const annonceSchema = new mongoose.Schema(
       type: localisationSchema,
       required: true
     },
+    prixPromo: {
+      type: Number,
+      default: null,
+      min: 0
+    },
     dateExpiration: {
       type: Date,
       required: true

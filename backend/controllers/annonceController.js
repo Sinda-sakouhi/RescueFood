@@ -56,7 +56,8 @@ async function createAnnonce(request, response, next) {
       unite,
       adresse,
       localisation,
-      dateExpiration
+      dateExpiration,
+      prixPromo
     } = request.body;
 
     let { categorieDonation } = request.body;
@@ -93,6 +94,7 @@ async function createAnnonce(request, response, next) {
       quantiteEstimee,
       unite,
       urgence,
+      prixPromo: type === 'OFFRE' ? (prixPromo || null) : null,
       adresse: adresse || request.user.adresse,
       localisation: localisation || request.user.localisation,
       dateExpiration,
@@ -194,10 +196,14 @@ async function deleteAnnonce(request, response, next) {
   }
 }
 
-// GET /api/annonces/mes-annonces — annonces de l'utilisateur connecté
+// GET /api/annonces/mes-annonces — annonces de l'utilisateur connecté (hors ANNULEE)
 async function mesAnnonces(request, response, next) {
   try {
-    const annonces = await Annonce.find({ auteur: request.user._id })
+    const annonces = await Annonce.find({
+      auteur: request.user._id,
+      statut: { $ne: 'ANNULEE' }
+    })
+      .populate('auteur', 'nom prenom')
       .populate('categorieDonation', 'nom typeProduit')
       .sort({ createdAt: -1 });
 

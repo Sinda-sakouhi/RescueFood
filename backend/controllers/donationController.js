@@ -29,6 +29,14 @@ async function listDonations(request, response, next) {
 
     const filter = {};
 
+    // FOURNISSEUR ne voit que ses propres dons
+    if (request.user.role === 'FOURNISSEUR') {
+      filter.fournisseur = request.user._id;
+    } else {
+      if (fournisseur) filter.fournisseur = fournisseur;
+      if (beneficiaire) filter.beneficiaire = beneficiaire;
+    }
+
     if (statut && STATUTS.includes(statut)) {
       filter.statut = statut;
     }
@@ -39,14 +47,6 @@ async function listDonations(request, response, next) {
 
     if (categorie) {
       filter.categorieDonation = categorie;
-    }
-
-    if (fournisseur) {
-      filter.fournisseur = fournisseur;
-    }
-
-    if (beneficiaire) {
-      filter.beneficiaire = beneficiaire;
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);

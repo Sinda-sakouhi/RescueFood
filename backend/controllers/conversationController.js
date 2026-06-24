@@ -51,15 +51,38 @@ async function createConversation(request, response, next) {
 // GET /api/conversations — mes conversations
 async function mesConversations(request, response, next) {
   try {
+    const userId = request.user._id;
+
     const conversations = await Conversation.find({
-      participants: request.user._id,
+      participants: userId,
       statut: 'ACTIVE'
     })
       .populate('participants', 'nom prenom role avatarUrl')
       .populate('annonce', 'titre type statut')
       .sort({ dernierMessageAt: -1 });
 
-    return response.json({ conversations });
+    // Ajouter le nombre de messages non lus par conversation
+    const convIds = conversations.map((c) => c._id);
+    const nonLusParConv = await Message.aggregate([
+      {
+        $match: {
+          conversation: { $in: convIds },
+          luPar: { $ne: userId }
+        }
+      },
+      { $group: { _id: '$conversation', nbrNonLus: { $sum: 1 } } }
+    ]);
+
+    const nonLusMap = Object.fromEntries(
+      nonLusParConv.map((r) => [r._id.toString(), r.nbrNonLus])
+    );
+
+    const result = conversations.map((c) => ({
+      ...c.toObject(),
+      nbrNonLus: nonLusMap[c._id.toString()] || 0
+    }));
+
+    return response.json({ conversations: result });
   } catch (error) {
     return next(error);
   }

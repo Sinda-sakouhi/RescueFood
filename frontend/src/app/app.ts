@@ -68,15 +68,30 @@ interface Annonce {
   dateExpiration: string;
   statut: string;
   createdAt: string;
+  prixPromo?: number | null;
 }
 
 interface Suggestion {
-  monAnnonce: { id: string; titre: string; type: string };
-  annonceCompatible: {
-    id: string;
+  donation: {
+    _id: string;
     titre: string;
-    type: string;
+    fournisseur: Utilisateur;
+    categorieDonation: Categorie;
+    quantiteEstimee: number;
+    unite: string;
+    urgence: string;
+    poidsTotalKg?: number;
+    adresseCollecte?: string;
+  };
+  demande: {
+    _id: string;
+    titre: string;
     auteur: Utilisateur;
+    categorieDonation: Categorie;
+    quantiteEstimee: number;
+    unite: string;
+    urgence: string;
+    adresse?: string;
   };
   score: number;
   criteres: Record<string, number>;
@@ -85,8 +100,8 @@ interface Suggestion {
 
 interface Matching {
   _id: string;
-  offre: Pick<Annonce, '_id' | 'titre' | 'type' | 'quantiteEstimee' | 'unite'>;
-  demande: Pick<Annonce, '_id' | 'titre' | 'type' | 'quantiteEstimee' | 'unite'>;
+  donation: Pick<Donation, '_id' | 'titre' | 'quantiteEstimee' | 'unite'>;
+  demande: Pick<Annonce, '_id' | 'titre' | 'quantiteEstimee' | 'unite'>;
   score: number;
   distanceKm: number;
   statut: string;
@@ -99,6 +114,7 @@ interface Conversation {
   annonce: Pick<Annonce, '_id' | 'titre' | 'type' | 'statut'>;
   statut: string;
   dernierMessageAt?: string;
+  nbrNonLus?: number;
 }
 
 interface Message {
@@ -347,6 +363,9 @@ export class App implements OnInit, OnDestroy {
   protected readonly conversations = signal<Conversation[]>([]);
   protected readonly messages = signal<Message[]>([]);
   protected readonly conversationSelectionnee = signal<Conversation | null>(null);
+  protected readonly totalNonLus = computed(() =>
+    this.conversations().reduce((acc, c) => acc + (c.nbrNonLus ?? 0), 0)
+  );
   protected readonly nouveauMessage = signal('');
   protected readonly filtreAnnonce = signal<'TOUS' | 'OFFRE' | 'DEMANDE'>('TOUS');
   protected readonly rechercheAnnonce = signal('');
@@ -362,8 +381,49 @@ export class App implements OnInit, OnDestroy {
     adresse: '',
     latitude: 36.8065,
     longitude: 10.1815,
-    dateExpiration: ''
+    dateExpiration: '',
+    prixPromo: null as number | null
   };
+
+  protected readonly erreursAnnonce = {
+    titre: '',
+    description: '',
+    dateExpiration: '',
+    quantiteEstimee: ''
+  };
+
+  protected validerChampAnnonce(champ: keyof typeof this.erreursAnnonce): void {
+    const v = this.annonceForm;
+    switch (champ) {
+      case 'titre':
+        this.erreursAnnonce.titre = v.titre.trim().length < 3
+          ? 'Le titre doit contenir au moins 3 caractères.' : '';
+        break;
+      case 'description':
+        this.erreursAnnonce.description = v.description.trim().length < 10
+          ? 'La description doit contenir au moins 10 caractères.' : '';
+        break;
+      case 'dateExpiration':
+        this.erreursAnnonce.dateExpiration = !v.dateExpiration
+          ? 'La date d\'expiration est requise.'
+          : new Date(v.dateExpiration) <= new Date()
+            ? 'La date doit être dans le futur.' : '';
+        break;
+      case 'quantiteEstimee':
+        this.erreursAnnonce.quantiteEstimee = v.quantiteEstimee <= 0
+          ? 'La quantité doit être supérieure à 0.' : '';
+        break;
+    }
+  }
+
+  protected formulaireAnnonceValide(): boolean {
+    return !this.erreursAnnonce.titre
+      && !this.erreursAnnonce.description
+      && !this.erreursAnnonce.dateExpiration
+      && !this.erreursAnnonce.quantiteEstimee
+      && !!this.annonceForm.titre.trim()
+      && !!this.annonceForm.dateExpiration;
+  }
 
   protected readonly collectes = signal<Collecte[]>([]);
   protected readonly pointsCarte = signal<PointCarte[]>([]);
@@ -432,6 +492,20 @@ export class App implements OnInit, OnDestroy {
 
   protected readonly profilTelephone = signal('');
   protected readonly profilAdresse = signal('');
+  protected readonly profilNom = signal('');
+  protected readonly profilPrenom = signal('');
+  protected readonly ancienMotDePasse = signal('');
+  protected readonly nouveauMotDePasse = signal('');
+  protected readonly confirmerMotDePasse = signal('');
+  protected readonly erreurMotDePasse = signal('');
+
+  protected readonly confirmDialogue = signal<{
+    titre: string;
+    corps: string;
+    action: () => void;
+  } | null>(null);
+
+  protected readonly Math = Math;
 
   protected readonly dateDuJour = new Intl.DateTimeFormat('fr-FR', {
     weekday: 'long',
@@ -472,7 +546,7 @@ export class App implements OnInit, OnDestroy {
     const recherche = this.rechercheAnnonce().trim().toLowerCase();
     const tri = this.triAnnonce();
 
-    let resultat = this.annonces().filter((annonce) => {
+    let resultat = this.mesAnnonces().filter((annonce) => {
       const typeOk = filtre === 'TOUS' || annonce.type === filtre;
       const categorieOk =
         categorie === 'TOUS' || annonce.categorieDonation?._id === categorie;
@@ -504,6 +578,76 @@ export class App implements OnInit, OnDestroy {
   });
   protected readonly filtreCategorie = signal('TOUS');
   protected readonly triAnnonce = signal<'RECENT' | 'URGENCE' | 'EXPIRATION'>('RECENT');
+
+  protected readonly statsAnnonces = computed(() => {
+    const all = this.mesAnnonces();
+    const now = Date.now();
+    const h24 = now + 24 * 60 * 60 * 1000;
+    return {
+      total: all.length,
+      offres: all.filter(a => a.type === 'OFFRE').length,
+      demandes: all.filter(a => a.type === 'DEMANDE').length,
+      actives: all.filter(a => a.statut === 'ACTIVE').length,
+      expirees: all.filter(a => a.statut === 'EXPIREE').length,
+      expirantBientot: all.filter(a => {
+        const t = new Date(a.dateExpiration).getTime();
+        return t > now && t < h24;
+      }).length
+    };
+  });
+
+  protected readonly chargementInventaire = signal(false);
+  protected readonly chargementAnnonces = signal(false);
+  protected readonly chargementMatching = signal(false);
+  protected readonly pageInventaire = signal(1);
+  protected readonly totalInventaire = signal(0);
+  protected readonly limitInventaire = 12;
+  protected readonly totalPagesInventaire = computed(() =>
+    Math.ceil(this.totalInventaire() / this.limitInventaire)
+  );
+
+  protected readonly rechercheOffreOng = signal('');
+  protected readonly filtreOffreCategorieOng = signal('TOUS');
+  protected readonly filtreOffrePrixOng = signal<'TOUS' | 'PAYANT' | 'GRATUIT'>('TOUS');
+
+  protected readonly annoncesOffrePubliques = computed(() =>
+    this.annonces().filter(a => a.type === 'OFFRE')
+  );
+
+  protected readonly annoncesOffreOngFiltrees = computed(() => {
+    const q = this.rechercheOffreOng().trim().toLowerCase();
+    const cat = this.filtreOffreCategorieOng();
+    const prix = this.filtreOffrePrixOng();
+    return this.annoncesOffrePubliques().filter(a => {
+      const catOk = cat === 'TOUS' || a.categorieDonation?._id === cat;
+      const prixOk = prix === 'TOUS'
+        || (prix === 'PAYANT' && a.prixPromo != null)
+        || (prix === 'GRATUIT' && a.prixPromo == null);
+      const qOk = !q
+        || a.titre.toLowerCase().includes(q)
+        || a.description?.toLowerCase().includes(q)
+        || a.categorieDonation?.nom?.toLowerCase().includes(q);
+      return catOk && prixOk && qOk;
+    });
+  });
+
+  protected readonly donationsDisponibles = computed(() =>
+    this.donations().filter(d => ['CREE', 'VALIDE'].includes(d.statut || ''))
+  );
+
+  protected readonly donationsOng = computed(() => {
+    const userId = this.utilisateur()?._id || this.utilisateur()?.id;
+    return this.donations().filter(d => {
+      const statut = d.statut || '';
+      const estDisponible = ['CREE', 'VALIDE'].includes(statut);
+      const estMonBeneficiaire =
+        d.beneficiaire &&
+        (d.beneficiaire._id === userId || (d.beneficiaire as any).id === userId);
+      // Afficher les disponibles + ceux réservés/en cours pour moi
+      return estDisponible || (['RESERVE', 'EN_COLLECTE'].includes(statut) && estMonBeneficiaire);
+    });
+  });
+
   protected readonly suggestionCategorieIA = signal<{
   typeProduit: string;
   categorie: Categorie | null;
@@ -817,6 +961,7 @@ export class App implements OnInit, OnDestroy {
     const expiration = new Date();
     expiration.setDate(expiration.getDate() + 2);
     this.annonceForm.dateExpiration = expiration.toISOString().slice(0, 16);
+    this.annonceForm.prixPromo = null;
     this.annonceEnEdition.set(null);
     this.suggestionCategorieIA.set(null);
     this.formulaireAnnonceOuvert.set(true);
@@ -843,7 +988,8 @@ export class App implements OnInit, OnDestroy {
           },
           dateExpiration: new Date(
             this.annonceForm.dateExpiration
-          ).toISOString()
+          ).toISOString(),
+          prixPromo: type === 'OFFRE' ? this.annonceForm.prixPromo : null
         },
         { headers: this.entetes() }
       )
@@ -860,6 +1006,14 @@ export class App implements OnInit, OnDestroy {
   }
 
   protected annulerAnnonce(annonce: Annonce): void {
+    this.demanderConfirmation(
+      'Supprimer cette annonce ?',
+      `"${annonce.titre}" sera retirée définitivement de la liste.`,
+      () => this.executerSuppressionAnnonce(annonce)
+    );
+  }
+
+  private executerSuppressionAnnonce(annonce: Annonce): void {
     this.http
       .delete(`/api/annonces/${annonce._id}`, { headers: this.entetes() })
       .subscribe({
@@ -936,19 +1090,10 @@ export class App implements OnInit, OnDestroy {
   }
 
   protected accepterSuggestion(suggestion: Suggestion): void {
-    const offreId =
-      suggestion.monAnnonce.type === 'OFFRE'
-        ? suggestion.monAnnonce.id
-        : suggestion.annonceCompatible.id;
-    const demandeId =
-      suggestion.monAnnonce.type === 'DEMANDE'
-        ? suggestion.monAnnonce.id
-        : suggestion.annonceCompatible.id;
-
     this.http
       .post(
         '/api/matchings',
-        { offreId, demandeId },
+        { donationId: suggestion.donation._id, demandeId: suggestion.demande._id },
         { headers: this.entetes() }
       )
       .subscribe({
@@ -990,6 +1135,26 @@ export class App implements OnInit, OnDestroy {
       .subscribe({
         next: ({ messages }) => this.messages.set(messages),
         error: (error) => this.signaler(error, 'Messages indisponibles.')
+      });
+  }
+
+  protected contacterFournisseur(annonce: Annonce): void {
+    const destinataireId = annonce.auteur?._id || annonce.auteur?.id;
+    if (!destinataireId) return;
+    this.http
+      .post<{ conversation: Conversation }>(
+        '/api/conversations',
+        { annonceId: annonce._id, destinataireId },
+        { headers: this.entetes() }
+      )
+      .subscribe({
+        next: ({ conversation }) => {
+          this.chargerConversations();
+          this.naviguer('messages');
+          this.ouvrirConversation(conversation);
+          this.notifier('Conversation ouverte avec le fournisseur.');
+        },
+        error: (error) => this.signaler(error, 'Impossible de contacter le fournisseur.')
       });
   }
 
@@ -1185,6 +1350,8 @@ export class App implements OnInit, OnDestroy {
       .patch(
         '/api/auth/me',
         {
+          nom: this.profilNom(),
+          prenom: this.profilPrenom(),
           telephone: this.profilTelephone(),
           adresse: this.profilAdresse()
         },
@@ -1197,6 +1364,47 @@ export class App implements OnInit, OnDestroy {
         },
         error: (error) => this.signaler(error, 'Profil non modifié.')
       });
+  }
+
+  protected changerMotDePasse(): void {
+    const ancien = this.ancienMotDePasse().trim();
+    const nouveau = this.nouveauMotDePasse().trim();
+    const confirmer = this.confirmerMotDePasse().trim();
+
+    if (nouveau.length < 8) {
+      this.erreurMotDePasse.set('Le nouveau mot de passe doit contenir au moins 8 caractères.');
+      return;
+    }
+    if (nouveau !== confirmer) {
+      this.erreurMotDePasse.set('Les mots de passe ne correspondent pas.');
+      return;
+    }
+    this.erreurMotDePasse.set('');
+
+    this.http
+      .post('/api/auth/changer-mot-de-passe', { ancien, nouveau }, { headers: this.entetes() })
+      .subscribe({
+        next: () => {
+          this.ancienMotDePasse.set('');
+          this.nouveauMotDePasse.set('');
+          this.confirmerMotDePasse.set('');
+          this.notifier('Mot de passe modifié avec succès.');
+        },
+        error: (error) => this.erreurMotDePasse.set(error.error?.message || 'Modification impossible.')
+      });
+  }
+
+  protected demanderConfirmation(titre: string, corps: string, action: () => void): void {
+    this.confirmDialogue.set({ titre, corps, action });
+  }
+
+  protected executerConfirmation(): void {
+    this.confirmDialogue()?.action();
+    this.confirmDialogue.set(null);
+  }
+
+  protected annulerConfirmation(): void {
+    this.confirmDialogue.set(null);
   }
 
   protected libelleStatut(statut: string): string {
@@ -1565,16 +1773,16 @@ export class App implements OnInit, OnDestroy {
   }
 
   protected supprimerDonation(donation: Donation): void {
-    if (!confirm(`Supprimer le don "${donation.titre}" ?`)) return;
-    this.http
-      .delete(`/api/donations/${donation._id}`, { headers: this.entetes() })
-      .subscribe({
-        next: () => {
-          this.notifier('Don supprimé.');
-          this.chargerInventaire();
-        },
-        error: (error) => this.signaler(error, 'Suppression impossible.')
-      });
+    this.demanderConfirmation(
+      'Supprimer ce don ?',
+      `"${donation.titre}" sera supprimé définitivement de l'inventaire.`,
+      () => this.http
+        .delete(`/api/donations/${donation._id}`, { headers: this.entetes() })
+        .subscribe({
+          next: () => { this.notifier('Don supprimé.'); this.chargerInventaire(); },
+          error: (error) => this.signaler(error, 'Suppression impossible.')
+        })
+    );
   }
 
   protected changerStatutDonation(donation: Donation, statut: string): void {
@@ -1684,33 +1892,50 @@ export class App implements OnInit, OnDestroy {
   }
 
   protected supprimerCategorie(categorie: Categorie): void {
-    if (!confirm(`Supprimer la catégorie "${categorie.nom}" ?`)) return;
-    this.http
-      .delete(`/api/categories/${categorie._id}`, { headers: this.entetes() })
-      .subscribe({
-        next: () => {
-          this.notifier('Catégorie supprimée.');
-          this.chargerDonneesPubliques();
-        },
-        error: (error) => this.signaler(error, 'Suppression impossible.')
-      });
+    this.demanderConfirmation(
+      'Supprimer cette catégorie ?',
+      `"${categorie.nom}" sera définitivement retirée. Les dons associés pourraient être affectés.`,
+      () => this.http
+        .delete(`/api/categories/${categorie._id}`, { headers: this.entetes() })
+        .subscribe({
+          next: () => { this.notifier('Catégorie supprimée.'); this.chargerDonneesPubliques(); },
+          error: (error) => this.signaler(error, 'Suppression impossible.')
+        })
+    );
   }
 
   private initialiserUtilisateur(user: Utilisateur): void {
     this.utilisateur.set(user);
+    this.profilNom.set(user.nom || '');
+    this.profilPrenom.set(user.prenom || '');
     this.profilTelephone.set(user.telephone || '');
     this.profilAdresse.set(user.adresse || '');
   }
 
-  private chargerInventaire(): void {
+  private chargerInventaire(page = this.pageInventaire()): void {
+    this.chargementInventaire.set(true);
     this.http
-      .get<{ donations: Donation[] }>('/api/donations?limit=100', {
-        headers: this.entetes()
-      })
+      .get<{ donations: Donation[]; pagination: { total: number } }>(
+        `/api/donations?page=${page}&limit=${this.limitInventaire}`,
+        { headers: this.entetes() }
+      )
       .subscribe({
-        next: ({ donations }) => this.donations.set(donations),
-        error: (error) => this.signaler(error, 'Inventaire indisponible.')
+        next: ({ donations, pagination }) => {
+          this.donations.set(donations);
+          this.totalInventaire.set(pagination?.total ?? donations.length);
+          this.chargementInventaire.set(false);
+        },
+        error: (error) => { this.signaler(error, 'Inventaire indisponible.'); this.chargementInventaire.set(false); }
       });
+  }
+
+  protected changerPageInventaire(page: number): void {
+    this.pageInventaire.set(page);
+    this.chargerInventaire(page);
+  }
+
+  protected pagesArray(n: number): number[] {
+    return Array.from({ length: Math.max(0, n) }, (_, i) => i + 1);
   }
 
   private chargerDonneesPubliques(): void {
@@ -1729,24 +1954,26 @@ export class App implements OnInit, OnDestroy {
   }
 
   private chargerMesAnnonces(): void {
+    this.chargementAnnonces.set(true);
     this.http
       .get<{ annonces: Annonce[] }>('/api/annonces/user/mes-annonces', {
         headers: this.entetes()
       })
       .subscribe({
-        next: ({ annonces }) => this.mesAnnonces.set(annonces),
-        error: (error) => this.signaler(error, 'Vos annonces sont indisponibles.')
+        next: ({ annonces }) => { this.mesAnnonces.set(annonces); this.chargementAnnonces.set(false); },
+        error: (error) => { this.signaler(error, 'Vos annonces sont indisponibles.'); this.chargementAnnonces.set(false); }
       });
   }
 
   private chargerMatching(): void {
+    this.chargementMatching.set(true);
     this.http
       .get<{ suggestions: Suggestion[] }>('/api/matchings/suggestions', {
         headers: this.entetes()
       })
       .subscribe({
-        next: ({ suggestions }) => this.suggestions.set(suggestions),
-        error: (error) => this.signaler(error, 'Suggestions indisponibles.')
+        next: ({ suggestions }) => { this.suggestions.set(suggestions); this.chargementMatching.set(false); },
+        error: (error) => { this.signaler(error, 'Suggestions indisponibles.'); this.chargementMatching.set(false); }
       });
     this.http
       .get<{ matchings: Matching[] }>('/api/matchings', {
