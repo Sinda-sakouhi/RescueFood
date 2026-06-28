@@ -11,7 +11,10 @@ const {
 } = require('../utils/logistique');
 const {
   optimiserOrdreCollectes,
+  optimiserItineraireRoutierML,
   evaluerRisqueRetard,
+  predireDureeCollecteML,
+  predireRetardML,
   scorerTransporteur
 } = require('../utils/logistiqueIA');
 
@@ -123,6 +126,26 @@ function calculerStatistiquesTransporteur(collectes) {
       ({ statut }) => statut === 'LIVREE'
     ).length
   };
+}
+
+/**
+ * Calcule les statistiques d'un transporteur pour une collecte donnée. La même
+ * méthode alimente l'ancien scoring et le nouveau modèle ML.
+ */
+async function statistiquesPourCollecte(collecte) {
+  if (!collecte.transporteur) {
+    return {
+      collectesActives: 0,
+      ponctualite: 0.8,
+      livraisonsTerminees: 0
+    };
+  }
+
+  const historique = await Collecte.find({
+    transporteur: collecte.transporteur
+  }).select('statut dateLivraison dateLivraisonPrevue');
+
+  return calculerStatistiquesTransporteur(historique);
 }
 
 /**
@@ -649,6 +672,122 @@ async function optimiserItineraire(request, response, next) {
 }
 
 /**
+ * POST /api/logistique/ml/itineraire/optimiser
+ * Optimise les missions actives avec OSRM lorsque le service routier répond,
+ * puis ajoute une prédiction ML de durée pour chaque collecte.
+ */
+async function optimiserItineraireML(request, response, next) {
+  try {
+    const transporteurId =
+      request.user.role === 'TRANSPORTEUR'
+        ? request.user._id
+        : request.body.transporteurId;
+    const { collecteIds, positionDepart } = request.body;
+
+    if (!identifiantValide(transporteurId)) {
+      return response.status(400).json({
+        message: 'Un transporteur valide est requis'
+      });
+    }
+    if (
+      positionDepart &&
+      (!Number.isFinite(positionDepart.latitude) ||
+        !Number.isFinite(positionDepart.longitude))
+    ) {
+      return response.status(400).json({
+        message: 'Position de départ invalide'
+      });
+    }
+
+    const transporteur = await User.findOne({
+      _id: transporteurId,
+      role: 'TRANSPORTEUR',
+      statutCompte: 'VALIDE'
+    }).select('nom prenom localisation');
+    if (!transporteur) {
+      return response.status(404).json({
+        message: 'Transporteur disponible introuvable'
+      });
+    }
+
+    const filtre = {
+      transporteur: transporteur._id,
+      statut: { $in: ['PLANIFIEE', 'EN_ROUTE', 'COLLECTEE'] }
+    };
+    if (Array.isArray(collecteIds) && collecteIds.length) {
+      if (collecteIds.some((id) => !identifiantValide(id))) {
+        return response.status(400).json({
+          message: 'Une collecte possède un identifiant invalide'
+        });
+      }
+      filtre._id = { $in: collecteIds };
+    }
+
+    const collectes = await Collecte.find(filtre)
+      .populate('donation', 'titre urgence dateLimiteCollecte')
+      .sort({ dateCollectePrevue: 1 });
+    if (!collectes.length) {
+      return response.status(404).json({
+        message: 'Aucune collecte active à optimiser pour ce transporteur'
+      });
+    }
+
+    const statistiques = calculerStatistiquesTransporteur(
+      await Collecte.find({ transporteur: transporteur._id }).select(
+        'statut dateLivraison dateLivraisonPrevue'
+      )
+    );
+    const statistiquesParCollecte = new Map(
+      collectes.map((collecte) => [
+        collecte.id,
+        {
+          collectesActivesTransporteur: statistiques.collectesActives,
+          ponctualiteTransporteur: statistiques.ponctualite
+        }
+      ])
+    );
+    const positionInitiale =
+      positionDepart ||
+      transporteur.localisation ||
+      collectes[0].positionActuelle ||
+      collectes[0].localisationDepart;
+    const resultat = await optimiserItineraireRoutierML(
+      collectes.map((collecte) => collecte.toObject()),
+      positionInitiale,
+      { statistiquesParCollecte }
+    );
+
+    return response.json({
+      methode: resultat.methode,
+      sourceRouting: resultat.sourceRouting,
+      raisonFallback: resultat.raisonFallback,
+      modele: 'Regression lineaire locale v1',
+      transporteur: {
+        id: transporteur.id,
+        nom: `${transporteur.prenom} ${transporteur.nom}`
+      },
+      distanceInitialeKm: resultat.distanceInitialeKm,
+      distanceOptimiseeKm: resultat.distanceOptimiseeKm,
+      gainDistanceKm: resultat.gainDistanceKm,
+      dureeRouteMinutes: resultat.dureeRouteMinutes,
+      polyline: resultat.polyline,
+      ordreOptimise: resultat.ordreOptimise.map(
+        ({ ordre, collecte, dureePrediteMinutes, prediction }) => ({
+          ordre,
+          collecteId: collecte._id,
+          reference: collecte.reference,
+          titre: collecte.donation?.titre,
+          dureePrediteMinutes,
+          prediction
+        })
+      )
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
  * GET /api/logistique/ia/collectes/:id/risque-retard
  * Évalue le risque de retard à partir de la mission, de la charge du
  * transporteur et de son historique de ponctualité.
@@ -691,6 +830,76 @@ async function risqueRetard(request, response, next) {
         dureeEstimeeMinutes: collecte.dureeEstimeeMinutes,
         dateLivraisonPrevue: collecte.dateLivraisonPrevue
       }
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * GET /api/logistique/ml/collectes/:id/duree-predite
+ * Prédit la durée réelle d'une mission avec le modèle ML local. La durée de
+ * base vient de la collecte et pourra être remplacée par OSRM dans l'itinéraire.
+ */
+async function dureePrediteML(request, response, next) {
+  try {
+    const collecte = await trouverCollecteAutorisee(
+      request.params.id,
+      request.user
+    );
+    if (!collecte) {
+      return response.status(404).json({ message: 'Collecte introuvable' });
+    }
+
+    await collecte.populate('donation', 'titre urgence dateLimiteCollecte');
+    const statistiques = await statistiquesPourCollecte(collecte);
+    const prediction = predireDureeCollecteML(collecte.toObject(), {
+      collectesActivesTransporteur: statistiques.collectesActives,
+      ponctualiteTransporteur: statistiques.ponctualite
+    });
+
+    return response.json({
+      collecte: {
+        id: collecte.id,
+        reference: collecte.reference,
+        titre: collecte.donation?.titre
+      },
+      prediction
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * GET /api/logistique/ml/collectes/:id/retard-predit
+ * Convertit la durée prédite en probabilité de retard exploitable par le
+ * dashboard et par le transporteur.
+ */
+async function retardPreditML(request, response, next) {
+  try {
+    const collecte = await trouverCollecteAutorisee(
+      request.params.id,
+      request.user
+    );
+    if (!collecte) {
+      return response.status(404).json({ message: 'Collecte introuvable' });
+    }
+
+    await collecte.populate('donation', 'titre urgence dateLimiteCollecte');
+    const statistiques = await statistiquesPourCollecte(collecte);
+    const prediction = predireRetardML(collecte.toObject(), {
+      collectesActivesTransporteur: statistiques.collectesActives,
+      ponctualiteTransporteur: statistiques.ponctualite
+    });
+
+    return response.json({
+      collecte: {
+        id: collecte.id,
+        reference: collecte.reference,
+        titre: collecte.donation?.titre
+      },
+      prediction
     });
   } catch (error) {
     return next(error);
@@ -1001,7 +1210,10 @@ module.exports = {
   updateStatut,
   updatePosition,
   optimiserItineraire,
+  optimiserItineraireML,
   risqueRetard,
+  dureePrediteML,
+  retardPreditML,
   recommanderTransporteurs,
   dashboard,
   carte,

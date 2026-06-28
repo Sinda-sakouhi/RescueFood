@@ -8,7 +8,10 @@ const {
 } = require('../utils/logistique');
 const {
   optimiserOrdreCollectes,
+  optimiserItineraireRoutierML,
   evaluerRisqueRetard,
+  predireDureeCollecteML,
+  predireRetardML,
   scorerTransporteur
 } = require('../utils/logistiqueIA');
 
@@ -107,4 +110,113 @@ test('la recommandation favorise proximité et disponibilité', () => {
 
   assert.ok(proche.score > eloigne.score);
   assert.ok(proche.pourcentage >= 80);
+});
+
+// Vérifie que le modèle ML tient compte du contexte et pas seulement de la distance.
+test('le modèle ML augmente la durée prévue en heure de pointe', () => {
+  const collecte = {
+    statut: 'PLANIFIEE',
+    donation: { urgence: 'MOYENNE' },
+    distanceKm: 8,
+    dureeEstimeeMinutes: 20,
+    dateCollectePrevue: '2026-06-15T08:00:00.000Z'
+  };
+  const fluide = predireDureeCollecteML(
+    {
+      ...collecte,
+      dateCollectePrevue: '2026-06-15T11:00:00.000Z'
+    },
+    {
+      collectesActivesTransporteur: 0,
+      ponctualiteTransporteur: 0.95
+    }
+  );
+  const charge = predireDureeCollecteML(collecte, {
+    collectesActivesTransporteur: 3,
+    ponctualiteTransporteur: 0.65
+  });
+
+  assert.ok(charge.dureePrediteMinutes > fluide.dureePrediteMinutes);
+  assert.equal(charge.caracteristiques.heurePointe, true);
+});
+
+// Reproduit une livraison impossible dans les temps avec le modèle ML.
+test('le retard ML devient critique quand la durée prédite dépasse l’échéance', () => {
+  const prediction = predireRetardML(
+    {
+      statut: 'PLANIFIEE',
+      transporteur: 'transporteur',
+      donation: { urgence: 'ELEVEE' },
+      distanceKm: 15,
+      dureeEstimeeMinutes: 45,
+      dateCollectePrevue: '2026-06-15T08:00:00.000Z',
+      dateLivraisonPrevue: '2026-06-15T08:20:00.000Z'
+    },
+    {
+      collectesActivesTransporteur: 4,
+      ponctualiteTransporteur: 0.6,
+      maintenant: new Date('2026-06-15T08:00:00.000Z')
+    }
+  );
+
+  assert.equal(prediction.niveau, 'CRITIQUE');
+  assert.ok(prediction.dureePrediteMinutes > 20);
+});
+
+// Mocke OSRM pour vérifier que la nouvelle optimisation utilise un ordre routier.
+test('l’optimisation ML utilise l’ordre renvoyé par OSRM', async () => {
+  const collectes = [
+    {
+      _id: 'collecte-1',
+      reference: 'COL-1',
+      statut: 'PLANIFIEE',
+      donation: { urgence: 'FAIBLE', titre: 'Mission 1' },
+      localisationDepart: { latitude: 36.82, longitude: 10.19 },
+      localisationArrivee: { latitude: 36.83, longitude: 10.2 },
+      dateCollectePrevue: '2026-06-15T10:00:00.000Z'
+    },
+    {
+      _id: 'collecte-2',
+      reference: 'COL-2',
+      statut: 'PLANIFIEE',
+      donation: { urgence: 'ELEVEE', titre: 'Mission 2' },
+      localisationDepart: { latitude: 36.8, longitude: 10.17 },
+      localisationArrivee: { latitude: 36.81, longitude: 10.18 },
+      dateCollectePrevue: '2026-06-15T09:00:00.000Z'
+    }
+  ];
+  const fetchImpl = async (url) => ({
+    ok: true,
+    json: async () =>
+      url.includes('/trip/')
+        ? {
+            code: 'Ok',
+            waypoints: [
+              { waypoint_index: 0 },
+              { waypoint_index: 2 },
+              { waypoint_index: 1 }
+            ]
+          }
+        : {
+            code: 'Ok',
+            routes: [
+              {
+                distance: 12300,
+                duration: 1800,
+                geometry: 'polyline-demo'
+              }
+            ]
+          }
+  });
+
+  const resultat = await optimiserItineraireRoutierML(
+    collectes,
+    { latitude: 36.8065, longitude: 10.1815 },
+    { fetchImpl }
+  );
+
+  assert.equal(resultat.sourceRouting, 'OSRM');
+  assert.equal(resultat.ordreOptimise[0].collecte._id, 'collecte-2');
+  assert.equal(resultat.polyline, 'polyline-demo');
+  assert.ok(resultat.ordreOptimise[0].dureePrediteMinutes > 0);
 });

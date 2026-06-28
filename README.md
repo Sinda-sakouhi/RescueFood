@@ -84,6 +84,8 @@ PORT=3000
 MONGODB_URI=mongodb://127.0.0.1:27017/RescueFood
 JWT_SECRET=remplacer-par-un-secret-long-et-aleatoire
 JWT_EXPIRES_IN=1h
+OSRM_BASE_URL=https://router.project-osrm.org
+OSRM_TIMEOUT_MS=4500
 ```
 
 Le fichier `.env` est privé et ne doit jamais être ajouté à Git.
@@ -240,6 +242,9 @@ Branche responsable : `feature/logistique-dashboard`.
 | `GET` | `/api/logistique/rapport.pdf` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Télécharger le rapport PDF |
 | `GET` | `/api/logistique/transporteurs` | `ADMIN` | Lister les transporteurs et leur charge |
 | `POST` | `/api/logistique/ia/itineraire/optimiser` | `ADMIN`, `TRANSPORTEUR` | Optimiser l'ordre des collectes |
+| `POST` | `/api/logistique/ml/itineraire/optimiser` | `ADMIN`, `TRANSPORTEUR` | Optimiser avec OSRM et prédire les durées |
+| `GET` | `/api/logistique/ml/collectes/:id/duree-predite` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Prédire la durée réelle d'une collecte |
+| `GET` | `/api/logistique/ml/collectes/:id/retard-predit` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Prédire le risque de retard avec le modèle ML |
 | `GET` | `/api/logistique/ia/collectes/:id/risque-retard` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Prédire le risque de retard |
 | `GET` | `/api/logistique/ia/collectes/:id/transporteurs-recommandes` | `ADMIN` | Classer les transporteurs |
 | `GET` | `/api/logistique/collectes` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Lister les collectes accessibles |
@@ -841,6 +846,30 @@ Ces fonctionnalités utilisent des scores multicritères déterministes. Elles n
 prétendent pas être un modèle entraîné sur un grand historique : chaque score
 est explicable, testable et pourra ensuite être remplacé par un modèle ML.
 
+La version ML ajoute une deuxième couche dans `backend/utils/logistiqueIA.js` :
+
+- OSRM calcule des distances et durées routières réelles quand Internet est
+  disponible ;
+- un modèle de régression locale prédit la durée réelle selon la durée routière,
+  l'heure de collecte, le jour, l'urgence, la charge du transporteur et sa
+  ponctualité ;
+- si OSRM ne répond pas, l'API revient automatiquement à l'optimisation locale
+  pour que la démonstration reste utilisable.
+
+Variables optionnelles :
+
+```env
+OSRM_BASE_URL=https://router.project-osrm.org
+OSRM_TIMEOUT_MS=4500
+```
+
+Pour une précision réelle en production, le modèle doit être réentraîné avec
+des historiques locaux : collectes tunisiennes, heures de pointe tunisiennes,
+durées réelles, retards, quartiers, météo ou jours spéciaux. Pour une première
+démonstration, il peut fonctionner avec des coefficients de départ et les
+routes OpenStreetMap d'OSRM, mais ses prédictions seront moins précises qu'un
+modèle entraîné sur Tunis.
+
 #### `POST /api/logistique/ia/itineraire/optimiser`
 
 L'administrateur fournit un transporteur. Le transporteur connecté utilise
@@ -945,6 +974,105 @@ Cette route administrateur classe les transporteurs validés pour une collecte
       ]
     }
   ]
+}
+```
+
+#### `POST /api/logistique/ml/itineraire/optimiser`
+
+Cette route utilise OSRM pour obtenir de vraies distances routières. Elle
+optimise l'ordre des points de collecte avec OSRM Trip, puis prédit une durée
+réelle pour chaque mission.
+
+```json
+{
+  "transporteurId": "OBJECT_ID",
+  "collecteIds": ["OBJECT_ID_OPTIONNEL"],
+  "positionDepart": {
+    "latitude": 36.8065,
+    "longitude": 10.1815
+  }
+}
+```
+
+Exemple de réponse :
+
+```json
+{
+  "methode": "OSRM Trip + modele ML de duree",
+  "sourceRouting": "OSRM",
+  "modele": "Regression lineaire locale v1",
+  "distanceInitialeKm": 18.4,
+  "distanceOptimiseeKm": 12.7,
+  "gainDistanceKm": 5.7,
+  "dureeRouteMinutes": 31,
+  "polyline": "encoded_polyline",
+  "ordreOptimise": [
+    {
+      "ordre": 1,
+      "collecteId": "OBJECT_ID",
+      "reference": "COL-DEMO-001",
+      "titre": "Cagettes de tomates",
+      "dureePrediteMinutes": 36,
+      "prediction": {
+        "modele": "Regression lineaire locale v1",
+        "donneesEntrainement": "Coefficients initialises pour demo, remplacables par historique tunisien",
+        "dureeRoutiereMinutes": 31,
+        "ecartMinutes": 5
+      }
+    }
+  ]
+}
+```
+
+Si OSRM est indisponible, `sourceRouting` vaut `FALLBACK_LOCAL` et la réponse
+contient `raisonFallback`.
+
+#### `GET /api/logistique/ml/collectes/:id/duree-predite`
+
+Prédit la durée réelle d'une collecte à partir du modèle local.
+
+```json
+{
+  "collecte": {
+    "id": "OBJECT_ID",
+    "reference": "COL-DEMO-001",
+    "titre": "Cagettes de tomates"
+  },
+  "prediction": {
+    "modele": "Regression lineaire locale v1",
+    "dureePrediteMinutes": 38,
+    "dureeRoutiereMinutes": 31,
+    "ecartMinutes": 7,
+    "caracteristiques": {
+      "heurePointe": true,
+      "weekend": false,
+      "urgenceElevee": true,
+      "collectesActivesTransporteur": 2,
+      "ponctualiteTransporteur": 0.8,
+      "distanceRouteKm": 8.4
+    }
+  }
+}
+```
+
+#### `GET /api/logistique/ml/collectes/:id/retard-predit`
+
+Convertit la durée prédite en risque de retard.
+
+```json
+{
+  "prediction": {
+    "modele": "Regression lineaire locale v1",
+    "score": 0.72,
+    "pourcentage": 72,
+    "niveau": "CRITIQUE",
+    "margeMinutes": -12,
+    "dureePrediteMinutes": 38,
+    "raisons": [
+      "Duree ML predite apres l echeance",
+      "Transporteur deja charge"
+    ]
+  }
 }
 ```
 

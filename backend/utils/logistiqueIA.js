@@ -1,5 +1,21 @@
 const { calculerDistanceKm, estimerDureeMinutes } = require('./logistique');
 
+const OSRM_BASE_URL =
+  process.env.OSRM_BASE_URL || 'https://router.project-osrm.org';
+const OSRM_TIMEOUT_MS = Number(process.env.OSRM_TIMEOUT_MS || 4500);
+
+const COEFFICIENTS_DUREE_ML = Object.freeze({
+  intercept: 3,
+  dureeRoutiere: 1.08,
+  heurePointe: 0.18,
+  weekend: -0.08,
+  urgenceElevee: -0.05,
+  urgenceMoyenne: 0,
+  missionsActives: 0.09,
+  ponctualiteFaible: 0.22,
+  distanceLongue: 0.06
+});
+
 /**
  * Maintient une valeur dans un intervalle, généralement entre 0 et 1.
  */
@@ -13,6 +29,128 @@ function borner(valeur, minimum = 0, maximum = 1) {
 function arrondir(valeur, decimales = 2) {
   const facteur = 10 ** decimales;
   return Math.round(valeur * facteur) / facteur;
+}
+
+/**
+ * Valide qu'un point possède des coordonnées GPS exploitables par OSRM.
+ */
+function pointValide(point) {
+  return (
+    point &&
+    Number.isFinite(point.latitude) &&
+    Number.isFinite(point.longitude) &&
+    point.latitude >= -90 &&
+    point.latitude <= 90 &&
+    point.longitude >= -180 &&
+    point.longitude <= 180
+  );
+}
+
+/**
+ * Convertit une position latitude/longitude au format OSRM longitude,latitude.
+ */
+function coordonneeOsrm(point) {
+  return `${point.longitude},${point.latitude}`;
+}
+
+/**
+ * Appelle OSRM avec un timeout court pour garder l'API utilisable en démo même
+ * si le service public de routing est lent ou indisponible.
+ */
+async function appelerOsrm(path, { fetchImpl = globalThis.fetch } = {}) {
+  if (!fetchImpl) {
+    throw new Error('Fetch indisponible pour appeler OSRM');
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OSRM_TIMEOUT_MS);
+
+  try {
+    const url = `${OSRM_BASE_URL.replace(/\/$/, '')}${path}`;
+    const response = await fetchImpl(url, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`OSRM a répondu ${response.status}`);
+    }
+
+    const body = await response.json();
+    if (body.code && body.code !== 'Ok') {
+      throw new Error(`OSRM code ${body.code}`);
+    }
+
+    return body;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Demande à OSRM la route routière réelle dans un ordre déjà choisi.
+ */
+async function calculerRouteOsrm(points, options = {}) {
+  if (points.length < 2 || points.some((point) => !pointValide(point))) {
+    throw new Error('Points GPS insuffisants pour OSRM');
+  }
+
+  const coordonnees = points.map(coordonneeOsrm).join(';');
+  const body = await appelerOsrm(
+    `/route/v1/driving/${coordonnees}?overview=full&geometries=polyline`,
+    options
+  );
+  const route = body.routes?.[0];
+  if (!route) {
+    throw new Error('Aucune route OSRM trouvée');
+  }
+
+  return {
+    distanceKm: arrondir(route.distance / 1000, 1),
+    dureeMinutes: Math.max(1, Math.round(route.duration / 60)),
+    polyline: route.geometry || null
+  };
+}
+
+/**
+ * Utilise OSRM Trip pour optimiser l'ordre des points de collecte sur de vraies
+ * routes routières. Les livraisons restent ensuite attachées à leur collecte.
+ */
+async function optimiserOrdrePickupOsrm(
+  collectes,
+  positionInitiale,
+  options = {}
+) {
+  const pointsPickup = collectes.map(pointDepartCollecte);
+  if (
+    !pointValide(positionInitiale) ||
+    pointsPickup.some((point) => !pointValide(point))
+  ) {
+    throw new Error('Coordonnées insuffisantes pour optimiser avec OSRM');
+  }
+
+  if (collectes.length === 1) {
+    return collectes;
+  }
+
+  const coordonnees = [positionInitiale, ...pointsPickup]
+    .map(coordonneeOsrm)
+    .join(';');
+  const body = await appelerOsrm(
+    `/trip/v1/driving/${coordonnees}?source=first&destination=any&roundtrip=false&overview=false`,
+    options
+  );
+  const waypoints = body.waypoints || [];
+  const ordreParIndex = new Map(
+    waypoints.map(({ waypoint_index: waypointIndex }, inputIndex) => [
+      inputIndex,
+      waypointIndex
+    ])
+  );
+
+  return collectes
+    .map((collecte, index) => ({
+      collecte,
+      ordreOsrm: ordreParIndex.get(index + 1) ?? index + 1
+    }))
+    .sort((a, b) => a.ordreOsrm - b.ordreOsrm)
+    .map(({ collecte }) => collecte);
 }
 
 /**
@@ -74,6 +212,183 @@ function distanceSequence(collectes, positionInitiale) {
   }
 
   return arrondir(total, 1);
+}
+
+/**
+ * Construit la succession réelle des arrêts : position actuelle, départ de la
+ * collecte, livraison ONG, puis collecte suivante.
+ */
+function construirePointsTournee(collectes, positionInitiale) {
+  const points = [];
+  if (pointValide(positionInitiale)) points.push(positionInitiale);
+
+  for (const collecte of collectes) {
+    const depart = pointDepartCollecte(collecte);
+    if (pointValide(depart)) points.push(depart);
+    if (pointValide(collecte.localisationArrivee)) {
+      points.push(collecte.localisationArrivee);
+    }
+  }
+
+  return points;
+}
+
+/**
+ * Prépare les facteurs utilisés par le modèle prédictif de durée.
+ */
+function extraireCaracteristiquesDuree(
+  collecte,
+  {
+    dureeRoutiereMinutes,
+    distanceRouteKm = collecte.distanceKm || 0,
+    collectesActivesTransporteur = 0,
+    ponctualiteTransporteur = 0.8,
+    maintenant = new Date()
+  } = {}
+) {
+  const dateCollecte = collecte.dateCollectePrevue
+    ? new Date(collecte.dateCollectePrevue)
+    : maintenant;
+  const heure = dateCollecte.getHours();
+  const jour = dateCollecte.getDay();
+  const urgence = collecte.donation?.urgence || collecte.urgence;
+
+  return {
+    dureeRoutiereMinutes,
+    distanceRouteKm,
+    heurePointe: (heure >= 7 && heure <= 9) || (heure >= 16 && heure <= 19),
+    weekend: jour === 0 || jour === 6,
+    urgenceElevee: urgence === 'ELEVEE',
+    urgenceMoyenne: urgence === 'MOYENNE',
+    collectesActivesTransporteur,
+    ponctualiteTransporteur,
+    ponctualiteFaible: ponctualiteTransporteur < 0.8,
+    distanceLongue: distanceRouteKm > 10
+  };
+}
+
+/**
+ * Modèle prédictif local de durée. Il joue le rôle d'une première régression
+ * entraînable : les coefficients peuvent être remplacés par un modèle appris
+ * sur l'historique tunisien lorsque le projet collecte assez de données.
+ */
+function predireDureeCollecteML(collecte, options = {}) {
+  const dureeRoutiereMinutes =
+    options.dureeRoutiereMinutes ||
+    collecte.dureeEstimeeMinutes ||
+    estimerDureeMinutes(collecte.distanceKm || 0);
+  const caracteristiques = extraireCaracteristiquesDuree(collecte, {
+    ...options,
+    dureeRoutiereMinutes
+  });
+
+  const multiplicateur =
+    1 +
+    (caracteristiques.heurePointe ? COEFFICIENTS_DUREE_ML.heurePointe : 0) +
+    (caracteristiques.weekend ? COEFFICIENTS_DUREE_ML.weekend : 0) +
+    (caracteristiques.urgenceElevee
+      ? COEFFICIENTS_DUREE_ML.urgenceElevee
+      : 0) +
+    (caracteristiques.urgenceMoyenne
+      ? COEFFICIENTS_DUREE_ML.urgenceMoyenne
+      : 0) +
+    Math.min(
+      0.35,
+      caracteristiques.collectesActivesTransporteur *
+        COEFFICIENTS_DUREE_ML.missionsActives
+    ) +
+    (caracteristiques.ponctualiteFaible
+      ? COEFFICIENTS_DUREE_ML.ponctualiteFaible
+      : 0) +
+    (caracteristiques.distanceLongue ? COEFFICIENTS_DUREE_ML.distanceLongue : 0);
+
+  const dureePrediteMinutes = Math.max(
+    5,
+    Math.round(
+      COEFFICIENTS_DUREE_ML.intercept +
+        dureeRoutiereMinutes *
+          COEFFICIENTS_DUREE_ML.dureeRoutiere *
+          multiplicateur
+    )
+  );
+
+  return {
+    modele: 'Regression lineaire locale v1',
+    donneesEntrainement:
+      'Coefficients initialises pour demo, remplacables par historique tunisien',
+    dureePrediteMinutes,
+    dureeRoutiereMinutes: Math.round(dureeRoutiereMinutes),
+    ecartMinutes: dureePrediteMinutes - Math.round(dureeRoutiereMinutes),
+    caracteristiques: {
+      heurePointe: caracteristiques.heurePointe,
+      weekend: caracteristiques.weekend,
+      urgenceElevee: caracteristiques.urgenceElevee,
+      collectesActivesTransporteur:
+        caracteristiques.collectesActivesTransporteur,
+      ponctualiteTransporteur: arrondir(
+        caracteristiques.ponctualiteTransporteur
+      ),
+      distanceRouteKm: arrondir(caracteristiques.distanceRouteKm, 1)
+    }
+  };
+}
+
+/**
+ * Convertit une durée prédite en risque métier de retard avec niveau et raisons.
+ */
+function predireRetardML(collecte, options = {}) {
+  const prediction = predireDureeCollecteML(collecte, options);
+  const maintenant = options.maintenant || new Date();
+  const livraisonPrevue = collecte.dateLivraisonPrevue
+    ? new Date(collecte.dateLivraisonPrevue)
+    : null;
+  const margeMinutes = livraisonPrevue
+    ? Math.round((livraisonPrevue - maintenant) / 60000) -
+      prediction.dureePrediteMinutes
+    : null;
+
+  let risque = 0.2;
+  const raisons = [];
+  if (!collecte.transporteur || collecte.statut === 'A_ASSIGNER') {
+    risque += 0.25;
+    raisons.push('Transporteur non assigne');
+  }
+  if (margeMinutes !== null) {
+    if (margeMinutes < 0) {
+      risque += Math.min(0.45, 0.25 + Math.abs(margeMinutes) / 180);
+      raisons.push('Duree ML predite apres l echeance');
+    } else if (margeMinutes < 30) {
+      risque += 0.18;
+      raisons.push('Marge inferieure a 30 minutes');
+    }
+  }
+  if (prediction.caracteristiques.heurePointe) {
+    risque += 0.12;
+    raisons.push('Collecte prevue en heure de pointe');
+  }
+  if (prediction.caracteristiques.collectesActivesTransporteur > 1) {
+    risque += 0.1;
+    raisons.push('Transporteur deja charge');
+  }
+  if (prediction.caracteristiques.ponctualiteTransporteur < 0.8) {
+    risque += 0.12;
+    raisons.push('Ponctualite historique faible');
+  }
+
+  risque = borner(risque);
+  const niveau =
+    risque >= 0.7 ? 'CRITIQUE' : risque >= 0.4 ? 'ATTENTION' : 'FAIBLE';
+
+  return {
+    modele: prediction.modele,
+    score: arrondir(risque),
+    pourcentage: Math.round(risque * 100),
+    niveau,
+    margeMinutes,
+    dureePrediteMinutes: prediction.dureePrediteMinutes,
+    raisons: raisons.length ? raisons : ['Aucun facteur ML de retard important'],
+    prediction
+  };
 }
 
 /**
@@ -141,6 +456,104 @@ function optimiserOrdreCollectes(
     ),
     dureeEstimeeMinutes: estimerDureeMinutes(distanceOptimiseeKm)
   };
+}
+
+/**
+ * Optimise une tournée avec de vraies distances routières OSRM et enrichit le
+ * résultat par une prédiction ML de durée/retard. En cas d'échec OSRM, le
+ * fallback garde l'ancienne optimisation locale.
+ */
+async function optimiserItineraireRoutierML(
+  collectes,
+  positionInitiale,
+  {
+    fetchImpl = globalThis.fetch,
+    statistiquesParCollecte = new Map(),
+    maintenant = new Date()
+  } = {}
+) {
+  try {
+    const ordreCollectes = await optimiserOrdrePickupOsrm(
+      collectes,
+      positionInitiale,
+      { fetchImpl }
+    );
+    const pointsOptimises = construirePointsTournee(
+      ordreCollectes,
+      positionInitiale
+    );
+    const pointsInitiaux = construirePointsTournee(
+      [...collectes].sort(
+        (a, b) =>
+          new Date(a.dateCollectePrevue) - new Date(b.dateCollectePrevue)
+      ),
+      positionInitiale
+    );
+    const [routeOptimisee, routeInitiale] = await Promise.all([
+      calculerRouteOsrm(pointsOptimises, { fetchImpl }),
+      calculerRouteOsrm(pointsInitiaux, { fetchImpl })
+    ]);
+    const dureeParCollecte = Math.max(
+      1,
+      Math.round(routeOptimisee.dureeMinutes / ordreCollectes.length)
+    );
+
+    return {
+      sourceRouting: 'OSRM',
+      methode: 'OSRM Trip + modele ML de duree',
+      distanceInitialeKm: routeInitiale.distanceKm,
+      distanceOptimiseeKm: routeOptimisee.distanceKm,
+      gainDistanceKm: arrondir(
+        Math.max(0, routeInitiale.distanceKm - routeOptimisee.distanceKm),
+        1
+      ),
+      dureeRouteMinutes: routeOptimisee.dureeMinutes,
+      polyline: routeOptimisee.polyline,
+      ordreOptimise: ordreCollectes.map((collecte, index) => {
+        const stats = statistiquesParCollecte.get(String(collecte._id)) || {};
+        const prediction = predireDureeCollecteML(collecte, {
+          ...stats,
+          dureeRoutiereMinutes: dureeParCollecte,
+          distanceRouteKm: routeOptimisee.distanceKm / ordreCollectes.length,
+          maintenant
+        });
+
+        return {
+          ordre: index + 1,
+          collecte,
+          dureePrediteMinutes: prediction.dureePrediteMinutes,
+          prediction
+        };
+      })
+    };
+  } catch (error) {
+    const fallback = optimiserOrdreCollectes(collectes, positionInitiale, maintenant);
+    return {
+      sourceRouting: 'FALLBACK_LOCAL',
+      methode: 'Fallback local sans OSRM',
+      raisonFallback: error.message,
+      distanceInitialeKm: fallback.distanceInitialeKm,
+      distanceOptimiseeKm: fallback.distanceOptimiseeKm,
+      gainDistanceKm: fallback.gainDistanceKm,
+      dureeRouteMinutes: fallback.dureeEstimeeMinutes,
+      polyline: null,
+      ordreOptimise: fallback.ordre.map(({ collecte }, index) => {
+        const stats = statistiquesParCollecte.get(String(collecte._id)) || {};
+        const prediction = predireDureeCollecteML(collecte, {
+          ...stats,
+          dureeRoutiereMinutes: fallback.dureeEstimeeMinutes,
+          maintenant
+        });
+
+        return {
+          ordre: index + 1,
+          collecte,
+          dureePrediteMinutes: prediction.dureePrediteMinutes,
+          prediction
+        };
+      })
+    };
+  }
 }
 
 /**
@@ -288,6 +701,9 @@ function scorerTransporteur(
 
 module.exports = {
   optimiserOrdreCollectes,
+  optimiserItineraireRoutierML,
   evaluerRisqueRetard,
+  predireDureeCollecteML,
+  predireRetardML,
   scorerTransporteur
 };

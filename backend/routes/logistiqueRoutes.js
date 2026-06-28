@@ -8,7 +8,10 @@ const {
   updateStatut,
   updatePosition,
   optimiserItineraire,
+  optimiserItineraireML,
   risqueRetard,
+  dureePrediteML,
+  retardPreditML,
   recommanderTransporteurs,
   dashboard,
   carte,
@@ -44,6 +47,21 @@ router.post(
   '/ia/itineraire/optimiser',
   authorizeRoles('ADMIN', 'TRANSPORTEUR'),
   optimiserItineraire
+);
+router.post(
+  '/ml/itineraire/optimiser',
+  authorizeRoles('ADMIN', 'TRANSPORTEUR'),
+  optimiserItineraireML
+);
+router.get(
+  '/ml/collectes/:id/duree-predite',
+  authorizeRoles('ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'),
+  dureePrediteML
+);
+router.get(
+  '/ml/collectes/:id/retard-predit',
+  authorizeRoles('ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'),
+  retardPreditML
 );
 router.get(
   '/ia/collectes/:id/risque-retard',
