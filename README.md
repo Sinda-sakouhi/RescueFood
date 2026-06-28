@@ -859,6 +859,9 @@ La version ML ajoute une deuxième couche dans `backend/utils/logistiqueIA.js` :
 - un modèle de régression locale prédit la durée réelle selon la durée routière,
   l'heure de collecte, le jour, l'urgence, la charge du transporteur, sa
   ponctualité, la zone et la météo ;
+- l'ordre final est multi-objectif : la sécurité alimentaire passe avant la
+  distance quand une denrée est plus fragile, par exemple produits laitiers,
+  chaîne du froid ou échéance très proche ;
 - si OSRM ne répond pas, l'API revient automatiquement à l'optimisation locale
   pour que la démonstration reste utilisable.
 
@@ -992,8 +995,10 @@ Cette route administrateur classe les transporteurs validés pour une collecte
 #### `POST /api/logistique/ml/itineraire/optimiser`
 
 Cette route utilise OSRM pour obtenir de vraies distances routières. Elle
-optimise l'ordre des points de collecte avec OSRM Trip, puis prédit une durée
-réelle pour chaque mission.
+combine ensuite l'ordre routier avec une priorité sanitaire afin d'éviter qu'un
+trajet court mette en danger une denrée fragile. Les produits laitiers, plats
+préparés, températures froides et échéances proches peuvent donc passer avant
+un arrêt plus proche.
 
 ```json
 {
@@ -1024,6 +1029,24 @@ Exemple de réponse :
       "collecteId": "OBJECT_ID",
       "reference": "COL-DEMO-001",
       "titre": "Cagettes de tomates",
+      "prioriteAlimentaire": {
+        "score": 0.88,
+        "pourcentage": 88,
+        "niveau": "CRITIQUE",
+        "typeProduit": "PRODUITS_LAITIERS",
+        "chaineFroid": true,
+        "temperatureStockage": 4,
+        "raisons": [
+          "type PRODUITS_LAITIERS",
+          "chaine du froid prioritaire",
+          "produits laitiers tres perissables"
+        ]
+      },
+      "criteresOptimisation": {
+        "prioriteAlimentaire": 0.88,
+        "proximite": 0.73,
+        "preferenceOsrm": 0.5
+      },
       "dureePrediteMinutes": 36,
       "prediction": {
         "modele": "Regression lineaire locale v1",

@@ -8,6 +8,7 @@ const {
 } = require('../utils/logistique');
 const {
   construireContexteTunisien,
+  evaluerPrioriteAlimentaire,
   optimiserOrdreCollectes,
   optimiserItineraireRoutierML,
   evaluerRisqueRetard,
@@ -260,4 +261,86 @@ test('l’optimisation ML utilise l’ordre renvoyé par OSRM', async () => {
   assert.equal(resultat.ordreOptimise[0].collecte._id, 'collecte-2');
   assert.equal(resultat.polyline, 'polyline-demo');
   assert.ok(resultat.ordreOptimise[0].dureePrediteMinutes > 0);
+});
+
+// Vérifie que la sécurité alimentaire peut passer devant l'ordre routier brut.
+test('l’optimisation ML priorise les produits laitiers fragiles avant un plat préparé', async () => {
+  const collectes = [
+    {
+      _id: 'couscous',
+      reference: 'COL-COUSCOUS',
+      statut: 'PLANIFIEE',
+      donation: {
+        urgence: 'ELEVEE',
+        titre: '45 portions de couscous',
+        temperatureStockage: 4,
+        conditionsStockage: 'Transport frigorifique obligatoire',
+        dateLimiteCollecte: '2026-06-15T12:00:00.000Z',
+        categorieDonation: { typeProduit: 'PLATS_PREPARES' }
+      },
+      localisationDepart: { latitude: 36.82, longitude: 10.19 },
+      localisationArrivee: { latitude: 36.83, longitude: 10.2 },
+      dateCollectePrevue: '2026-06-15T08:00:00.000Z'
+    },
+    {
+      _id: 'laitiers',
+      reference: 'COL-LAIT',
+      statut: 'PLANIFIEE',
+      donation: {
+        urgence: 'MOYENNE',
+        titre: 'Produits laitiers du buffet',
+        temperatureStockage: 4,
+        conditionsStockage: 'Chaîne du froid obligatoire',
+        dateLimiteCollecte: '2026-06-15T12:00:00.000Z',
+        categorieDonation: { typeProduit: 'PRODUITS_LAITIERS' }
+      },
+      localisationDepart: { latitude: 36.8, longitude: 10.17 },
+      localisationArrivee: { latitude: 36.81, longitude: 10.18 },
+      dateCollectePrevue: '2026-06-15T08:00:00.000Z'
+    }
+  ];
+  const fetchImpl = async (url) => ({
+    ok: true,
+    json: async () =>
+      url.includes('/trip/')
+        ? {
+            code: 'Ok',
+            waypoints: [
+              { waypoint_index: 0 },
+              { waypoint_index: 1 },
+              { waypoint_index: 2 }
+            ]
+          }
+        : {
+            code: 'Ok',
+            routes: [
+              {
+                distance: 12000,
+                duration: 1800,
+                geometry: 'polyline-demo'
+              }
+            ]
+          }
+  });
+
+  const prioriteLaitiers = evaluerPrioriteAlimentaire(
+    collectes[1],
+    new Date('2026-06-15T08:00:00.000Z')
+  );
+  const prioriteCouscous = evaluerPrioriteAlimentaire(
+    collectes[0],
+    new Date('2026-06-15T08:00:00.000Z')
+  );
+  const resultat = await optimiserItineraireRoutierML(
+    collectes,
+    { latitude: 36.8065, longitude: 10.1815 },
+    { fetchImpl, maintenant: new Date('2026-06-15T08:00:00.000Z') }
+  );
+
+  assert.ok(prioriteLaitiers.score > prioriteCouscous.score);
+  assert.equal(resultat.ordreOptimise[0].collecte._id, 'laitiers');
+  assert.equal(
+    resultat.ordreOptimise[0].prioriteAlimentaire.typeProduit,
+    'PRODUITS_LAITIERS'
+  );
 });

@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+﻿const mongoose = require('mongoose');
 const PDFDocument = require('pdfkit');
 const Collecte = require('../models/Collecte');
 const Donation = require('../models/Donation');
@@ -11,6 +11,7 @@ const {
 } = require('../utils/logistique');
 const {
   construireContexteTunisien,
+  evaluerPrioriteAlimentaire,
   optimiserOrdreCollectes,
   optimiserItineraireRoutierML,
   evaluerRisqueRetard,
@@ -46,6 +47,16 @@ const populateCollecte = [
     select: 'nom prenom telephone adresse localisation'
   }
 ];
+
+const populateDonationML = {
+  path: 'donation',
+  select:
+    'titre description urgence dateLimiteCollecte temperatureStockage conditionsStockage categorieDonation',
+  populate: {
+    path: 'categorieDonation',
+    select: 'nom typeProduit prioriteRedistribution dureeConservationEstimee'
+  }
+};
 
 /**
  * Construit le filtre MongoDB correspondant au rôle connecté.
@@ -622,7 +633,7 @@ async function optimiserItineraire(request, response, next) {
     }
 
     const collectes = await Collecte.find(filtre)
-      .populate('donation', 'titre urgence dateLimiteCollecte')
+      .populate(populateDonationML)
       .sort({ dateCollectePrevue: 1 });
     if (!collectes.length) {
       return response.status(404).json({
@@ -725,7 +736,7 @@ async function optimiserItineraireML(request, response, next) {
     }
 
     const collectes = await Collecte.find(filtre)
-      .populate('donation', 'titre urgence dateLimiteCollecte')
+      .populate(populateDonationML)
       .sort({ dateCollectePrevue: 1 });
     if (!collectes.length) {
       return response.status(404).json({
@@ -779,11 +790,20 @@ async function optimiserItineraireML(request, response, next) {
       dureeRouteMinutes: resultat.dureeRouteMinutes,
       polyline: resultat.polyline,
       ordreOptimise: resultat.ordreOptimise.map(
-        ({ ordre, collecte, dureePrediteMinutes, prediction }) => ({
+        ({
+          ordre,
+          collecte,
+          prioriteAlimentaire,
+          criteresOptimisation,
+          dureePrediteMinutes,
+          prediction
+        }) => ({
           ordre,
           collecteId: collecte._id,
           reference: collecte.reference,
           titre: collecte.donation?.titre,
+          prioriteAlimentaire,
+          criteresOptimisation,
           dureePrediteMinutes,
           prediction
         })
@@ -858,7 +878,7 @@ async function contexteTunisienML(request, response, next) {
       return response.status(404).json({ message: 'Collecte introuvable' });
     }
 
-    await collecte.populate('donation', 'titre urgence dateLimiteCollecte');
+    await collecte.populate(populateDonationML);
     const contexte = await construireContexteTunisien(collecte.toObject());
 
     return response.json({
@@ -889,7 +909,7 @@ async function dureePrediteML(request, response, next) {
       return response.status(404).json({ message: 'Collecte introuvable' });
     }
 
-    await collecte.populate('donation', 'titre urgence dateLimiteCollecte');
+    await collecte.populate(populateDonationML);
     const statistiques = await statistiquesPourCollecte(collecte);
     const contexteTunisien = await construireContexteTunisien(
       collecte.toObject()
@@ -906,6 +926,7 @@ async function dureePrediteML(request, response, next) {
         reference: collecte.reference,
         titre: collecte.donation?.titre
       },
+      prioriteAlimentaire: evaluerPrioriteAlimentaire(collecte.toObject()),
       prediction
     });
   } catch (error) {
@@ -928,7 +949,7 @@ async function retardPreditML(request, response, next) {
       return response.status(404).json({ message: 'Collecte introuvable' });
     }
 
-    await collecte.populate('donation', 'titre urgence dateLimiteCollecte');
+    await collecte.populate(populateDonationML);
     const statistiques = await statistiquesPourCollecte(collecte);
     const contexteTunisien = await construireContexteTunisien(
       collecte.toObject()
@@ -945,6 +966,7 @@ async function retardPreditML(request, response, next) {
         reference: collecte.reference,
         titre: collecte.donation?.titre
       },
+      prioriteAlimentaire: evaluerPrioriteAlimentaire(collecte.toObject()),
       prediction
     });
   } catch (error) {

@@ -378,6 +378,84 @@ function scoreEcheance(date, maintenant) {
 }
 
 /**
+ * Identifie le type alimentaire même lorsque la catégorie est peuplée par
+ * Mongoose ou seulement stockée comme référence.
+ */
+function typeProduitCollecte(collecte) {
+  const categorie = collecte.donation?.categorieDonation;
+  return categorie?.typeProduit || categorie?.type || null;
+}
+
+/**
+ * Calcule la priorité sanitaire d'une collecte. Cette priorité passe avant la
+ * distance quand une denrée est très périssable ou doit rester en chaîne du
+ * froid.
+ */
+function evaluerPrioriteAlimentaire(collecte, maintenant = new Date()) {
+  const donation = collecte.donation || {};
+  const typeProduit = typeProduitCollecte(collecte);
+  const temperature = donation.temperatureStockage;
+  const conditions = `${donation.conditionsStockage || ''} ${
+    donation.description || ''
+  }`.toLowerCase();
+  const baseParType = {
+    PRODUITS_LAITIERS: 1,
+    PLATS_PREPARES: 0.92,
+    FRUITS_LEGUMES: 0.68,
+    PAIN_VIENNOISERIE: 0.48,
+    BOISSONS: 0.3,
+    CONSERVES: 0.18,
+    AUTRE: 0.45
+  };
+  const base = baseParType[typeProduit] ?? 0.45;
+  const froid =
+    temperature !== null &&
+    temperature !== undefined &&
+    Number.isFinite(Number(temperature)) &&
+    Number(temperature) <= 8;
+  const froidStrict = froid && Number(temperature) <= 4;
+  const produitLaitier = typeProduit === 'PRODUITS_LAITIERS';
+  const chaineFroid =
+    froid ||
+    conditions.includes('froid') ||
+    conditions.includes('frigorifique') ||
+    conditions.includes('réfrig') ||
+    conditions.includes('refrig');
+  const dateLimite =
+    donation.dateLimiteCollecte ||
+    collecte.dateLivraisonPrevue ||
+    collecte.dateCollectePrevue;
+  const echeance = scoreEcheance(dateLimite, maintenant);
+  const urgence = scoreUrgence(donation.urgence || collecte.urgence);
+  const score = borner(
+    base * 0.45 +
+      echeance * 0.25 +
+      urgence * 0.15 +
+      (chaineFroid ? 0.1 : 0) +
+      (froidStrict ? 0.05 : 0) +
+      (produitLaitier ? 0.08 : 0)
+  );
+  const raisons = [
+    `type ${typeProduit || 'inconnu'}`,
+    `urgence ${donation.urgence || collecte.urgence || 'non renseignee'}`,
+    `echeance ${arrondir(echeance)}`
+  ];
+  if (chaineFroid) raisons.push('chaine du froid prioritaire');
+  if (froidStrict) raisons.push('temperature <= 4°C');
+  if (produitLaitier) raisons.push('produits laitiers tres perissables');
+
+  return {
+    score: arrondir(score),
+    pourcentage: Math.round(score * 100),
+    niveau: score >= 0.75 ? 'CRITIQUE' : score >= 0.55 ? 'ELEVEE' : 'NORMALE',
+    typeProduit,
+    chaineFroid,
+    temperatureStockage: temperature ?? null,
+    raisons
+  };
+}
+
+/**
  * Détermine le prochain point utile d'une collecte. Une mission déjà en cours
  * repart de sa position GPS actuelle plutôt que de son adresse initiale.
  */
@@ -428,6 +506,74 @@ function construirePointsTournee(collectes, positionInitiale) {
   }
 
   return points;
+}
+
+/**
+ * Choisit l'ordre des collectes en combinant priorité sanitaire, proximité et
+ * ordre routier OSRM. Le but est d'éviter qu'un trajet court mette en danger
+ * une denrée fragile.
+ */
+function optimiserOrdreSanitaire(
+  collectes,
+  positionInitiale,
+  { ordreOsrm = collectes, maintenant = new Date() } = {}
+) {
+  const ordreOsrmParId = new Map(
+    ordreOsrm.map((collecte, index) => [String(collecte._id), index])
+  );
+  const restantes = [...collectes];
+  const ordre = [];
+  let position = positionInitiale;
+
+  while (restantes.length) {
+    const candidates = restantes.map((collecte) => {
+      const prioriteAlimentaire = evaluerPrioriteAlimentaire(
+        collecte,
+        maintenant
+      );
+      const depart = pointDepartCollecte(collecte);
+      const distanceApprocheKm =
+        position && depart ? calculerDistanceKm(position, depart) : 0;
+      const proximite = borner(1 - distanceApprocheKm / 30);
+      const rangOsrm = ordreOsrmParId.get(String(collecte._id)) ?? 0;
+      const preferenceOsrm =
+        restantes.length <= 1 ? 1 : 1 - rangOsrm / Math.max(1, collectes.length - 1);
+      const score =
+        prioriteAlimentaire.score * 0.62 +
+        proximite * 0.23 +
+        preferenceOsrm * 0.15;
+
+      return {
+        collecte,
+        score,
+        prioriteAlimentaire,
+        distanceApprocheKm,
+        criteres: {
+          prioriteAlimentaire: prioriteAlimentaire.score,
+          proximite: arrondir(proximite),
+          preferenceOsrm: arrondir(preferenceOsrm)
+        }
+      };
+    });
+
+    candidates.sort((a, b) => {
+      const differenceSanitaire =
+        b.prioriteAlimentaire.score - a.prioriteAlimentaire.score;
+      if (Math.abs(differenceSanitaire) >= 0.02) {
+        return differenceSanitaire;
+      }
+      return b.score - a.score;
+    });
+    const meilleure = candidates[0];
+    ordre.push(meilleure);
+    restantes.splice(restantes.indexOf(meilleure.collecte), 1);
+    position =
+      meilleure.collecte.localisationArrivee ||
+      pointDepartCollecte(meilleure.collecte) ||
+      position;
+  }
+
+  return ordre;
 }
 
 /**
@@ -697,11 +843,16 @@ async function optimiserItineraireRoutierML(
   } = {}
 ) {
   try {
-    const ordreCollectes = await optimiserOrdrePickupOsrm(
+    const ordreOsrm = await optimiserOrdrePickupOsrm(
       collectes,
       positionInitiale,
       { fetchImpl }
     );
+    const ordreSanitaire = optimiserOrdreSanitaire(collectes, positionInitiale, {
+      ordreOsrm,
+      maintenant
+    });
+    const ordreCollectes = ordreSanitaire.map(({ collecte }) => collecte);
     const pointsOptimises = construirePointsTournee(
       ordreCollectes,
       positionInitiale
@@ -733,7 +884,8 @@ async function optimiserItineraireRoutierML(
       ),
       dureeRouteMinutes: routeOptimisee.dureeMinutes,
       polyline: routeOptimisee.polyline,
-      ordreOptimise: ordreCollectes.map((collecte, index) => {
+      ordreOptimise: ordreSanitaire.map((item, index) => {
+        const { collecte, prioriteAlimentaire, criteres } = item;
         const stats = statistiquesParCollecte.get(String(collecte._id)) || {};
         const prediction = predireDureeCollecteML(collecte, {
           ...stats,
@@ -746,27 +898,47 @@ async function optimiserItineraireRoutierML(
         return {
           ordre: index + 1,
           collecte,
+          prioriteAlimentaire,
+          criteresOptimisation: criteres,
           dureePrediteMinutes: prediction.dureePrediteMinutes,
           prediction
         };
       })
     };
   } catch (error) {
-    const fallback = optimiserOrdreCollectes(collectes, positionInitiale, maintenant);
+    const ordreSanitaire = optimiserOrdreSanitaire(collectes, positionInitiale, {
+      maintenant
+    });
+    const collectesOrdonnees = ordreSanitaire.map(({ collecte }) => collecte);
+    const distanceInitialeKm = distanceSequence(
+      [...collectes].sort(
+        (a, b) =>
+          new Date(a.dateCollectePrevue) - new Date(b.dateCollectePrevue)
+      ),
+      positionInitiale
+    );
+    const distanceOptimiseeKm = distanceSequence(
+      collectesOrdonnees,
+      positionInitiale
+    );
     return {
       sourceRouting: 'FALLBACK_LOCAL',
-      methode: 'Fallback local sans OSRM',
+      methode: 'Fallback local avec priorite alimentaire',
       raisonFallback: error.message,
-      distanceInitialeKm: fallback.distanceInitialeKm,
-      distanceOptimiseeKm: fallback.distanceOptimiseeKm,
-      gainDistanceKm: fallback.gainDistanceKm,
-      dureeRouteMinutes: fallback.dureeEstimeeMinutes,
+      distanceInitialeKm,
+      distanceOptimiseeKm,
+      gainDistanceKm: arrondir(
+        Math.max(0, distanceInitialeKm - distanceOptimiseeKm),
+        1
+      ),
+      dureeRouteMinutes: estimerDureeMinutes(distanceOptimiseeKm),
       polyline: null,
-      ordreOptimise: fallback.ordre.map(({ collecte }, index) => {
+      ordreOptimise: ordreSanitaire.map((item, index) => {
+        const { collecte, prioriteAlimentaire, criteres } = item;
         const stats = statistiquesParCollecte.get(String(collecte._id)) || {};
         const prediction = predireDureeCollecteML(collecte, {
           ...stats,
-          dureeRoutiereMinutes: fallback.dureeEstimeeMinutes,
+          dureeRoutiereMinutes: estimerDureeMinutes(distanceOptimiseeKm),
           contexteTunisien: stats.contexteTunisien,
           maintenant
         });
@@ -774,6 +946,8 @@ async function optimiserItineraireRoutierML(
         return {
           ordre: index + 1,
           collecte,
+          prioriteAlimentaire,
+          criteresOptimisation: criteres,
           dureePrediteMinutes: prediction.dureePrediteMinutes,
           prediction
         };
@@ -927,6 +1101,7 @@ function scorerTransporteur(
 
 module.exports = {
   construireContexteTunisien,
+  evaluerPrioriteAlimentaire,
   optimiserOrdreCollectes,
   optimiserItineraireRoutierML,
   evaluerRisqueRetard,
