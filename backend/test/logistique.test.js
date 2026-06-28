@@ -7,6 +7,7 @@ const {
   estimerDureeMinutes
 } = require('../utils/logistique');
 const {
+  construireContexteTunisien,
   optimiserOrdreCollectes,
   optimiserItineraireRoutierML,
   evaluerRisqueRetard,
@@ -138,6 +139,46 @@ test('le modèle ML augmente la durée prévue en heure de pointe', () => {
 
   assert.ok(charge.dureePrediteMinutes > fluide.dureePrediteMinutes);
   assert.equal(charge.caracteristiques.heurePointe, true);
+});
+
+// Vérifie que le contexte tunisien enrichit la prédiction avec zone et météo.
+test('le contexte tunisien ajoute zone, météo et pénalité locale', async () => {
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () => ({
+      current: {
+        precipitation: 1.2,
+        rain: 1.2,
+        weather_code: 61,
+        wind_speed_10m: 38
+      }
+    })
+  });
+  const collecte = {
+    statut: 'PLANIFIEE',
+    localisationDepart: { latitude: 36.8065, longitude: 10.1815 },
+    localisationArrivee: { latitude: 36.839, longitude: 10.244 },
+    dateCollectePrevue: '2026-06-19T12:00:00.000Z',
+    donation: { urgence: 'ELEVEE' },
+    dureeEstimeeMinutes: 20
+  };
+
+  const contexte = await construireContexteTunisien(collecte, {
+    fetchImpl,
+    maintenant: new Date('2026-06-19T10:00:00.000Z')
+  });
+  const prediction = predireDureeCollecteML(collecte, {
+    contexteTunisien: contexte,
+    collectesActivesTransporteur: 1,
+    ponctualiteTransporteur: 0.9
+  });
+
+  assert.equal(contexte.zoneDepart.nom, 'Centre-ville Tunis');
+  assert.equal(contexte.heurePointe.type, 'VENDREDI_MIDI');
+  assert.equal(contexte.meteo.pluie, true);
+  assert.equal(contexte.meteo.ventFort, true);
+  assert.ok(prediction.dureePrediteMinutes > collecte.dureeEstimeeMinutes);
+  assert.equal(prediction.caracteristiques.zoneDepart, 'Centre-ville Tunis');
 });
 
 // Reproduit une livraison impossible dans les temps avec le modèle ML.

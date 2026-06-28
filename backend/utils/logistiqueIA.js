@@ -3,6 +3,9 @@ const { calculerDistanceKm, estimerDureeMinutes } = require('./logistique');
 const OSRM_BASE_URL =
   process.env.OSRM_BASE_URL || 'https://router.project-osrm.org';
 const OSRM_TIMEOUT_MS = Number(process.env.OSRM_TIMEOUT_MS || 4500);
+const OPEN_METEO_BASE_URL =
+  process.env.OPEN_METEO_BASE_URL || 'https://api.open-meteo.com';
+const OPEN_METEO_TIMEOUT_MS = Number(process.env.OPEN_METEO_TIMEOUT_MS || 3500);
 
 const COEFFICIENTS_DUREE_ML = Object.freeze({
   intercept: 3,
@@ -13,8 +16,49 @@ const COEFFICIENTS_DUREE_ML = Object.freeze({
   urgenceMoyenne: 0,
   missionsActives: 0.09,
   ponctualiteFaible: 0.22,
-  distanceLongue: 0.06
+  distanceLongue: 0.06,
+  congestionZone: 0.12,
+  pluie: 0.14,
+  ventFort: 0.08
 });
+
+const ZONES_TUNIS = Object.freeze([
+  {
+    nom: 'Centre-ville Tunis',
+    latitude: 36.8065,
+    longitude: 10.1815,
+    congestion: 0.85,
+    description: 'Hyper-centre, nombreuses intersections et stationnement difficile'
+  },
+  {
+    nom: 'Lac et Berges du Lac',
+    latitude: 36.839,
+    longitude: 10.244,
+    congestion: 0.65,
+    description: 'Zone de bureaux avec pics matin et soir'
+  },
+  {
+    nom: 'Ariana',
+    latitude: 36.8665,
+    longitude: 10.1647,
+    congestion: 0.7,
+    description: 'Flux domicile-travail vers Tunis'
+  },
+  {
+    nom: 'Ben Arous',
+    latitude: 36.7531,
+    longitude: 10.2189,
+    congestion: 0.58,
+    description: 'Zone mixte industrielle et résidentielle'
+  },
+  {
+    nom: 'La Marsa',
+    latitude: 36.8782,
+    longitude: 10.3247,
+    congestion: 0.55,
+    description: 'Trafic côtier et déplacements vers le Grand Tunis'
+  }
+]);
 
 /**
  * Maintient une valeur dans un intervalle, généralement entre 0 et 1.
@@ -78,6 +122,39 @@ async function appelerOsrm(path, { fetchImpl = globalThis.fetch } = {}) {
     }
 
     return body;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Appelle Open-Meteo pour récupérer un contexte météo actuel sans clé API.
+ */
+async function appelerOpenMeteo(point, { fetchImpl = globalThis.fetch } = {}) {
+  if (!fetchImpl || !pointValide(point)) {
+    throw new Error('Coordonnees meteo invalides');
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OPEN_METEO_TIMEOUT_MS);
+
+  try {
+    const params = new URLSearchParams({
+      latitude: String(point.latitude),
+      longitude: String(point.longitude),
+      current: 'precipitation,rain,weather_code,wind_speed_10m',
+      timezone: 'Africa/Tunis'
+    });
+    const url = `${OPEN_METEO_BASE_URL.replace(
+      /\/$/,
+      ''
+    )}/v1/forecast?${params.toString()}`;
+    const response = await fetchImpl(url, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`Open-Meteo a repondu ${response.status}`);
+    }
+
+    return response.json();
   } finally {
     clearTimeout(timeout);
   }
@@ -162,6 +239,126 @@ function heuresAvant(date, maintenant = new Date()) {
 }
 
 /**
+ * Détermine si une date tombe dans les créneaux de pointe typiques du Grand
+ * Tunis. Ces règles servent d'approximation avant de disposer de données
+ * historiques fines par quartier.
+ */
+function analyserHeurePointeTunis(date) {
+  const heure = date.getHours();
+  const jour = date.getDay();
+  const vendredi = jour === 5;
+  const matin = heure >= 7 && heure <= 9;
+  const midiVendredi = vendredi && heure >= 11 && heure <= 14;
+  const soir = heure >= 16 && heure <= 19;
+
+  return {
+    heurePointe: matin || midiVendredi || soir,
+    type:
+      (matin && 'POINTE_MATIN') ||
+      (midiVendredi && 'VENDREDI_MIDI') ||
+      (soir && 'POINTE_SOIR') ||
+      'FLUIDE'
+  };
+}
+
+/**
+ * Associe un point GPS à la zone tunisienne de référence la plus proche.
+ */
+function trouverZoneTunisienne(point) {
+  if (!pointValide(point)) {
+    return {
+      nom: 'Zone inconnue',
+      distanceKm: null,
+      congestion: 0.5,
+      description: 'Coordonnees absentes'
+    };
+  }
+
+  return ZONES_TUNIS.map((zone) => ({
+    ...zone,
+    distanceKm: calculerDistanceKm(point, zone)
+  })).sort((a, b) => a.distanceKm - b.distanceKm)[0];
+}
+
+/**
+ * Transforme les données météo en pénalités simples et explicables.
+ */
+function analyserMeteo(openMeteoBody) {
+  const current = openMeteoBody?.current || {};
+  const precipitation = Number(current.precipitation || current.rain || 0);
+  const ventKmh = Number(current.wind_speed_10m || 0);
+  const weatherCode = Number(current.weather_code || 0);
+  const pluie = precipitation > 0.2 || [51, 53, 55, 61, 63, 65, 80, 81, 82].includes(weatherCode);
+  const ventFort = ventKmh >= 35;
+
+  return {
+    source: 'Open-Meteo',
+    precipitationMm: arrondir(precipitation, 1),
+    ventKmh: arrondir(ventKmh, 1),
+    weatherCode,
+    pluie,
+    ventFort,
+    penalite: arrondir((pluie ? 0.14 : 0) + (ventFort ? 0.08 : 0))
+  };
+}
+
+/**
+ * Construit le contexte tunisien utilisé par les prédictions ML : zone,
+ * congestion locale, heure de pointe et météo actuelle.
+ */
+async function construireContexteTunisien(
+  collecte,
+  { fetchImpl = globalThis.fetch, maintenant = new Date() } = {}
+) {
+  const depart = pointDepartCollecte(collecte);
+  const arrivee = collecte.localisationArrivee;
+  const dateCollecte = collecte.dateCollectePrevue
+    ? new Date(collecte.dateCollectePrevue)
+    : maintenant;
+  const zoneDepart = trouverZoneTunisienne(depart);
+  const zoneArrivee = trouverZoneTunisienne(arrivee);
+  const heurePointe = analyserHeurePointeTunis(dateCollecte);
+
+  let meteo = {
+    source: 'Fallback local',
+    precipitationMm: 0,
+    ventKmh: 0,
+    weatherCode: null,
+    pluie: false,
+    ventFort: false,
+    penalite: 0,
+    erreur: null
+  };
+  try {
+    meteo = analyserMeteo(await appelerOpenMeteo(depart, { fetchImpl }));
+  } catch (error) {
+    meteo.erreur = error.message;
+  }
+
+  return {
+    zoneDepart: {
+      nom: zoneDepart.nom,
+      distanceKm: zoneDepart.distanceKm,
+      congestion: zoneDepart.congestion,
+      description: zoneDepart.description
+    },
+    zoneArrivee: {
+      nom: zoneArrivee.nom,
+      distanceKm: zoneArrivee.distanceKm,
+      congestion: zoneArrivee.congestion,
+      description: zoneArrivee.description
+    },
+    heurePointe,
+    meteo,
+    penaliteContexte: arrondir(
+      (heurePointe.heurePointe ? 0.18 : 0) +
+        zoneDepart.congestion * COEFFICIENTS_DUREE_ML.congestionZone +
+        meteo.penalite
+    )
+  };
+}
+
+/**
  * Convertit le niveau d'urgence métier en score numérique normalisé.
  */
 function scoreUrgence(urgence) {
@@ -243,6 +440,7 @@ function extraireCaracteristiquesDuree(
     distanceRouteKm = collecte.distanceKm || 0,
     collectesActivesTransporteur = 0,
     ponctualiteTransporteur = 0.8,
+    contexteTunisien = null,
     maintenant = new Date()
   } = {}
 ) {
@@ -256,14 +454,22 @@ function extraireCaracteristiquesDuree(
   return {
     dureeRoutiereMinutes,
     distanceRouteKm,
-    heurePointe: (heure >= 7 && heure <= 9) || (heure >= 16 && heure <= 19),
+    heurePointe:
+      contexteTunisien?.heurePointe?.heurePointe ||
+      (heure >= 7 && heure <= 9) ||
+      (heure >= 16 && heure <= 19),
+    typeHeurePointe: contexteTunisien?.heurePointe?.type || null,
     weekend: jour === 0 || jour === 6,
     urgenceElevee: urgence === 'ELEVEE',
     urgenceMoyenne: urgence === 'MOYENNE',
     collectesActivesTransporteur,
     ponctualiteTransporteur,
     ponctualiteFaible: ponctualiteTransporteur < 0.8,
-    distanceLongue: distanceRouteKm > 10
+    distanceLongue: distanceRouteKm > 10,
+    contexteTunisien,
+    congestionZone: contexteTunisien?.zoneDepart?.congestion || 0,
+    pluie: Boolean(contexteTunisien?.meteo?.pluie),
+    ventFort: Boolean(contexteTunisien?.meteo?.ventFort)
   };
 }
 
@@ -301,6 +507,10 @@ function predireDureeCollecteML(collecte, options = {}) {
       ? COEFFICIENTS_DUREE_ML.ponctualiteFaible
       : 0) +
     (caracteristiques.distanceLongue ? COEFFICIENTS_DUREE_ML.distanceLongue : 0);
+    const contexteSupplementaire =
+      caracteristiques.congestionZone * COEFFICIENTS_DUREE_ML.congestionZone +
+      (caracteristiques.pluie ? COEFFICIENTS_DUREE_ML.pluie : 0) +
+      (caracteristiques.ventFort ? COEFFICIENTS_DUREE_ML.ventFort : 0);
 
   const dureePrediteMinutes = Math.max(
     5,
@@ -308,7 +518,7 @@ function predireDureeCollecteML(collecte, options = {}) {
       COEFFICIENTS_DUREE_ML.intercept +
         dureeRoutiereMinutes *
           COEFFICIENTS_DUREE_ML.dureeRoutiere *
-          multiplicateur
+          (multiplicateur + contexteSupplementaire)
     )
   );
 
@@ -321,6 +531,7 @@ function predireDureeCollecteML(collecte, options = {}) {
     ecartMinutes: dureePrediteMinutes - Math.round(dureeRoutiereMinutes),
     caracteristiques: {
       heurePointe: caracteristiques.heurePointe,
+      typeHeurePointe: caracteristiques.typeHeurePointe,
       weekend: caracteristiques.weekend,
       urgenceElevee: caracteristiques.urgenceElevee,
       collectesActivesTransporteur:
@@ -328,7 +539,12 @@ function predireDureeCollecteML(collecte, options = {}) {
       ponctualiteTransporteur: arrondir(
         caracteristiques.ponctualiteTransporteur
       ),
-      distanceRouteKm: arrondir(caracteristiques.distanceRouteKm, 1)
+      distanceRouteKm: arrondir(caracteristiques.distanceRouteKm, 1),
+      zoneDepart: caracteristiques.contexteTunisien?.zoneDepart?.nom || null,
+      congestionZone: arrondir(caracteristiques.congestionZone),
+      pluie: caracteristiques.pluie,
+      ventFort: caracteristiques.ventFort,
+      meteoSource: caracteristiques.contexteTunisien?.meteo?.source || null
     }
   };
 }
@@ -365,6 +581,14 @@ function predireRetardML(collecte, options = {}) {
   if (prediction.caracteristiques.heurePointe) {
     risque += 0.12;
     raisons.push('Collecte prevue en heure de pointe');
+  }
+  if (prediction.caracteristiques.pluie) {
+    risque += 0.1;
+    raisons.push('Meteo pluvieuse detectee');
+  }
+  if (prediction.caracteristiques.congestionZone >= 0.7) {
+    risque += 0.08;
+    raisons.push('Zone de depart a congestion elevee');
   }
   if (prediction.caracteristiques.collectesActivesTransporteur > 1) {
     risque += 0.1;
@@ -515,6 +739,7 @@ async function optimiserItineraireRoutierML(
           ...stats,
           dureeRoutiereMinutes: dureeParCollecte,
           distanceRouteKm: routeOptimisee.distanceKm / ordreCollectes.length,
+          contexteTunisien: stats.contexteTunisien,
           maintenant
         });
 
@@ -542,6 +767,7 @@ async function optimiserItineraireRoutierML(
         const prediction = predireDureeCollecteML(collecte, {
           ...stats,
           dureeRoutiereMinutes: fallback.dureeEstimeeMinutes,
+          contexteTunisien: stats.contexteTunisien,
           maintenant
         });
 
@@ -700,6 +926,7 @@ function scorerTransporteur(
 }
 
 module.exports = {
+  construireContexteTunisien,
   optimiserOrdreCollectes,
   optimiserItineraireRoutierML,
   evaluerRisqueRetard,

@@ -10,6 +10,7 @@ const {
   optimiserItineraire,
   optimiserItineraireML,
   risqueRetard,
+  contexteTunisienML,
   dureePrediteML,
   retardPreditML,
   recommanderTransporteurs,
@@ -52,6 +53,11 @@ router.post(
   '/ml/itineraire/optimiser',
   authorizeRoles('ADMIN', 'TRANSPORTEUR'),
   optimiserItineraireML
+);
+router.get(
+  '/ml/collectes/:id/contexte-tunisien',
+  authorizeRoles('ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'),
+  contexteTunisienML
 );
 router.get(
   '/ml/collectes/:id/duree-predite',

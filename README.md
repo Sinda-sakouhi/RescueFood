@@ -86,6 +86,8 @@ JWT_SECRET=remplacer-par-un-secret-long-et-aleatoire
 JWT_EXPIRES_IN=1h
 OSRM_BASE_URL=https://router.project-osrm.org
 OSRM_TIMEOUT_MS=4500
+OPEN_METEO_BASE_URL=https://api.open-meteo.com
+OPEN_METEO_TIMEOUT_MS=3500
 ```
 
 Le fichier `.env` est privé et ne doit jamais être ajouté à Git.
@@ -243,6 +245,7 @@ Branche responsable : `feature/logistique-dashboard`.
 | `GET` | `/api/logistique/transporteurs` | `ADMIN` | Lister les transporteurs et leur charge |
 | `POST` | `/api/logistique/ia/itineraire/optimiser` | `ADMIN`, `TRANSPORTEUR` | Optimiser l'ordre des collectes |
 | `POST` | `/api/logistique/ml/itineraire/optimiser` | `ADMIN`, `TRANSPORTEUR` | Optimiser avec OSRM et prédire les durées |
+| `GET` | `/api/logistique/ml/collectes/:id/contexte-tunisien` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Analyser zone, heure de pointe et météo |
 | `GET` | `/api/logistique/ml/collectes/:id/duree-predite` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Prédire la durée réelle d'une collecte |
 | `GET` | `/api/logistique/ml/collectes/:id/retard-predit` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Prédire le risque de retard avec le modèle ML |
 | `GET` | `/api/logistique/ia/collectes/:id/risque-retard` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Prédire le risque de retard |
@@ -850,9 +853,12 @@ La version ML ajoute une deuxième couche dans `backend/utils/logistiqueIA.js` :
 
 - OSRM calcule des distances et durées routières réelles quand Internet est
   disponible ;
+- Open-Meteo ajoute un contexte météo réel sans clé API ;
+- une approximation locale associe les coordonnées à une zone du Grand Tunis
+  et applique des créneaux de pointe typiques : matin, soir et vendredi midi ;
 - un modèle de régression locale prédit la durée réelle selon la durée routière,
-  l'heure de collecte, le jour, l'urgence, la charge du transporteur et sa
-  ponctualité ;
+  l'heure de collecte, le jour, l'urgence, la charge du transporteur, sa
+  ponctualité, la zone et la météo ;
 - si OSRM ne répond pas, l'API revient automatiquement à l'optimisation locale
   pour que la démonstration reste utilisable.
 
@@ -861,6 +867,8 @@ Variables optionnelles :
 ```env
 OSRM_BASE_URL=https://router.project-osrm.org
 OSRM_TIMEOUT_MS=4500
+OPEN_METEO_BASE_URL=https://api.open-meteo.com
+OPEN_METEO_TIMEOUT_MS=3500
 ```
 
 Pour une précision réelle en production, le modèle doit être réentraîné avec
@@ -869,6 +877,10 @@ durées réelles, retards, quartiers, météo ou jours spéciaux. Pour une premi
 démonstration, il peut fonctionner avec des coefficients de départ et les
 routes OpenStreetMap d'OSRM, mais ses prédictions seront moins précises qu'un
 modèle entraîné sur Tunis.
+
+Les zones tunisiennes intégrées sont une approximation de démonstration :
+Centre-ville Tunis, Lac et Berges du Lac, Ariana, Ben Arous et La Marsa. Elles
+servent à expliquer le modèle, pas à remplacer une vraie base de trafic.
 
 #### `POST /api/logistique/ia/itineraire/optimiser`
 
@@ -1027,6 +1039,49 @@ Exemple de réponse :
 Si OSRM est indisponible, `sourceRouting` vaut `FALLBACK_LOCAL` et la réponse
 contient `raisonFallback`.
 
+#### `GET /api/logistique/ml/collectes/:id/contexte-tunisien`
+
+Retourne les facteurs locaux utilisés par le modèle ML : zone de départ,
+zone d'arrivée, heure de pointe tunisienne, météo Open-Meteo et pénalité de
+contexte.
+
+```json
+{
+  "collecte": {
+    "id": "OBJECT_ID",
+    "reference": "COL-DEMO-001",
+    "titre": "Cagettes de tomates"
+  },
+  "contexte": {
+    "zoneDepart": {
+      "nom": "Centre-ville Tunis",
+      "congestion": 0.85,
+      "description": "Hyper-centre, nombreuses intersections et stationnement difficile"
+    },
+    "zoneArrivee": {
+      "nom": "Lac et Berges du Lac",
+      "congestion": 0.65
+    },
+    "heurePointe": {
+      "heurePointe": true,
+      "type": "POINTE_MATIN"
+    },
+    "meteo": {
+      "source": "Open-Meteo",
+      "precipitationMm": 0.4,
+      "ventKmh": 22,
+      "pluie": true,
+      "ventFort": false,
+      "penalite": 0.14
+    },
+    "penaliteContexte": 0.42
+  }
+}
+```
+
+Si Open-Meteo est indisponible, `meteo.source` vaut `Fallback local` et la
+prédiction continue sans bloquer la démonstration.
+
 #### `GET /api/logistique/ml/collectes/:id/duree-predite`
 
 Prédit la durée réelle d'une collecte à partir du modèle local.
@@ -1049,7 +1104,12 @@ Prédit la durée réelle d'une collecte à partir du modèle local.
       "urgenceElevee": true,
       "collectesActivesTransporteur": 2,
       "ponctualiteTransporteur": 0.8,
-      "distanceRouteKm": 8.4
+      "distanceRouteKm": 8.4,
+      "zoneDepart": "Centre-ville Tunis",
+      "congestionZone": 0.85,
+      "pluie": true,
+      "ventFort": false,
+      "meteoSource": "Open-Meteo"
     }
   }
 }

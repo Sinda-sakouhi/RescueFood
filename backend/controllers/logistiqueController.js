@@ -10,6 +10,7 @@ const {
   estimerDureeMinutes
 } = require('../utils/logistique');
 const {
+  construireContexteTunisien,
   optimiserOrdreCollectes,
   optimiserItineraireRoutierML,
   evaluerRisqueRetard,
@@ -737,12 +738,18 @@ async function optimiserItineraireML(request, response, next) {
         'statut dateLivraison dateLivraisonPrevue'
       )
     );
+    const contextes = await Promise.all(
+      collectes.map((collecte) =>
+        construireContexteTunisien(collecte.toObject())
+      )
+    );
     const statistiquesParCollecte = new Map(
-      collectes.map((collecte) => [
+      collectes.map((collecte, index) => [
         collecte.id,
         {
           collectesActivesTransporteur: statistiques.collectesActives,
-          ponctualiteTransporteur: statistiques.ponctualite
+          ponctualiteTransporteur: statistiques.ponctualite,
+          contexteTunisien: contextes[index]
         }
       ])
     );
@@ -837,6 +844,37 @@ async function risqueRetard(request, response, next) {
 }
 
 /**
+ * GET /api/logistique/ml/collectes/:id/contexte-tunisien
+ * Expose les facteurs locaux utilisés par le modèle : zone, heure de pointe,
+ * météo et pénalités appliquées.
+ */
+async function contexteTunisienML(request, response, next) {
+  try {
+    const collecte = await trouverCollecteAutorisee(
+      request.params.id,
+      request.user
+    );
+    if (!collecte) {
+      return response.status(404).json({ message: 'Collecte introuvable' });
+    }
+
+    await collecte.populate('donation', 'titre urgence dateLimiteCollecte');
+    const contexte = await construireContexteTunisien(collecte.toObject());
+
+    return response.json({
+      collecte: {
+        id: collecte.id,
+        reference: collecte.reference,
+        titre: collecte.donation?.titre
+      },
+      contexte
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
  * GET /api/logistique/ml/collectes/:id/duree-predite
  * Prédit la durée réelle d'une mission avec le modèle ML local. La durée de
  * base vient de la collecte et pourra être remplacée par OSRM dans l'itinéraire.
@@ -853,9 +891,13 @@ async function dureePrediteML(request, response, next) {
 
     await collecte.populate('donation', 'titre urgence dateLimiteCollecte');
     const statistiques = await statistiquesPourCollecte(collecte);
+    const contexteTunisien = await construireContexteTunisien(
+      collecte.toObject()
+    );
     const prediction = predireDureeCollecteML(collecte.toObject(), {
       collectesActivesTransporteur: statistiques.collectesActives,
-      ponctualiteTransporteur: statistiques.ponctualite
+      ponctualiteTransporteur: statistiques.ponctualite,
+      contexteTunisien
     });
 
     return response.json({
@@ -888,9 +930,13 @@ async function retardPreditML(request, response, next) {
 
     await collecte.populate('donation', 'titre urgence dateLimiteCollecte');
     const statistiques = await statistiquesPourCollecte(collecte);
+    const contexteTunisien = await construireContexteTunisien(
+      collecte.toObject()
+    );
     const prediction = predireRetardML(collecte.toObject(), {
       collectesActivesTransporteur: statistiques.collectesActives,
-      ponctualiteTransporteur: statistiques.ponctualite
+      ponctualiteTransporteur: statistiques.ponctualite,
+      contexteTunisien
     });
 
     return response.json({
@@ -1212,6 +1258,7 @@ module.exports = {
   optimiserItineraire,
   optimiserItineraireML,
   risqueRetard,
+  contexteTunisienML,
   dureePrediteML,
   retardPreditML,
   recommanderTransporteurs,
