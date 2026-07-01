@@ -148,3 +148,6 @@ vite.config.ts.timestamp-*
 # Editors
 .idea/
 .vscode/
+
+# Office temporary files
+~$*
