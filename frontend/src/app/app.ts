@@ -639,7 +639,7 @@ export class App implements OnInit, OnDestroy {
     const userId = this.utilisateur()?._id || this.utilisateur()?.id;
     return this.donations().filter(d => {
       const statut = d.statut || '';
-      const estDisponible = ['CREE', 'VALIDE'].includes(statut);
+      const estDisponible = ['CREE', 'VALIDE', 'EN_ATTENTE_VALIDATION'].includes(statut);
       const estMonBeneficiaire =
         d.beneficiaire &&
         (d.beneficiaire._id === userId || (d.beneficiaire as any).id === userId);

@@ -22,15 +22,21 @@ function calculerScore(donation, demande) {
 
   const locDon = donation.localisationCollecte;
   const locDem = demande.localisation;
-  const distance = calculerDistance(
-    locDon.latitude, locDon.longitude,
-    locDem.latitude, locDem.longitude
-  );
-  const scoreDistance = Math.max(0, 1 - distance / 50);
+  let scoreDistance = 0.5;
+  let distanceKm = null;
 
-  const scoreQuantite =
-    Math.min(donation.quantiteEstimee, demande.quantiteEstimee) /
-    Math.max(donation.quantiteEstimee, demande.quantiteEstimee);
+  if (locDon?.latitude && locDon?.longitude && locDem?.latitude && locDem?.longitude) {
+    const distance = calculerDistance(
+      locDon.latitude, locDon.longitude,
+      locDem.latitude, locDem.longitude
+    );
+    scoreDistance = Math.max(0, 1 - distance / 50);
+    distanceKm = Math.round(distance * 10) / 10;
+  }
+
+  const qDon = donation.quantiteEstimee || 1;
+  const qDem = demande.quantiteEstimee || 1;
+  const scoreQuantite = Math.min(qDon, qDem) / Math.max(qDon, qDem);
 
   const niveaux = { FAIBLE: 1, MOYENNE: 2, ELEVEE: 3 };
   const urgenceDon = niveaux[donation.urgence] || 2;
@@ -51,7 +57,7 @@ function calculerScore(donation, demande) {
       quantite: Math.round(scoreQuantite * 100) / 100,
       urgence: Math.round(scoreUrgence * 100) / 100
     },
-    distanceKm: Math.round(distance * 10) / 10
+    distanceKm
   };
 }
 
@@ -90,7 +96,7 @@ async function getSuggestions(request, response, next) {
       }).populate('categorieDonation', 'nom');
 
       donations = await Donation.find({
-        statut: { $in: ['CREE', 'VALIDE'] },
+        statut: { $in: ['CREE', 'VALIDE', 'EN_ATTENTE_VALIDATION'] },
         fournisseur: { $ne: userId }
       })
         .populate('fournisseur', 'nom prenom role')
@@ -105,7 +111,7 @@ async function getSuggestions(request, response, next) {
 
     for (const donation of donations) {
       for (const demande of demandes) {
-        if (!donation.localisationCollecte || !demande.localisation) continue;
+        // localisation optionnelle — score distance = 0.5 si absente
 
         const { score, criteres, distanceKm } = calculerScore(donation, demande);
 

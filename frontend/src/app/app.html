@@ -1338,13 +1338,13 @@
 
         @case ("inventaire") {
           @if (utilisateur()?.role === "ADMIN") {
-            <section class="panel">
-              <div class="panel__header">
+            <section class="inv-cat-section">
+              <div class="inv-cat-section__header">
                 <div>
                   <span class="eyebrow">Administration</span>
-                  <h2>Catégories de produits</h2>
+                  <h3 class="inv-cat-section__title">Catégories de produits</h3>
                 </div>
-                <button class="button button--primary" type="button" (click)="ouvrirFormulaireCategorie()">
+                <button class="button button--primary button--sm" type="button" (click)="ouvrirFormulaireCategorie()">
                   + Nouvelle catégorie
                 </button>
               </div>
@@ -1355,7 +1355,7 @@
                       <th>Nom</th>
                       <th>Type</th>
                       <th>Priorité</th>
-                      <th>Conservation (j)</th>
+                      <th>Conservation</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
@@ -1363,16 +1363,16 @@
                     @for (cat of categories(); track cat._id) {
                       <tr>
                         <td><strong>{{ cat.nom }}</strong></td>
-                        <td><span class="badge">{{ cat.typeProduit }}</span></td>
+                        <td><span class="badge badge--type">{{ cat.typeProduit }}</span></td>
                         <td>
                           <span class="badge badge--urgence-{{ cat.prioriteRedistribution }}">
                             {{ cat.prioriteRedistribution }}
                           </span>
                         </td>
-                        <td>{{ cat.dureeConservationEstimee }} j</td>
+                        <td class="inv-cat-duree">{{ cat.dureeConservationEstimee }} j</td>
                         <td class="action-cell">
-                          <button class="button button--sm button--secondary" type="button" (click)="ouvrirFormulaireCategorie(cat)">Modifier</button>
-                          <button class="button button--sm button--danger" type="button" (click)="supprimerCategorie(cat)">Supprimer</button>
+                          <button class="button button--xs button--ghost" type="button" (click)="ouvrirFormulaireCategorie(cat)">Modifier</button>
+                          <button class="button button--xs button--danger-ghost" type="button" (click)="supprimerCategorie(cat)">Supprimer</button>
                         </td>
                       </tr>
                     }
@@ -1572,19 +1572,19 @@
                   }
                   <div class="donation-card__actions" (click)="$event.stopPropagation()">
                     @if (peutModifierDonation(don)) {
-                      <button class="button button--sm button--secondary" type="button" (click)="ouvrirFormulaireDonation(don)">
+                      <button class="button button--xs button--ghost" type="button" (click)="ouvrirFormulaireDonation(don)">
                         Modifier
                       </button>
                     }
                     @if (peutSupprimerDonation(don)) {
-                      <button class="button button--sm button--danger" type="button" (click)="supprimerDonation(don)">
+                      <button class="button button--xs button--danger-ghost" type="button" (click)="supprimerDonation(don)">
                         Supprimer
                       </button>
                     }
                     @if (utilisateur()?.role === 'ONG') {
                       @if (['CREE','VALIDE'].includes(don.statut || '')) {
-                        <button class="button button--sm button--secondary" type="button" (click)="naviguer('matching')">
-                          Voir le matching →
+                        <button class="button button--xs button--ghost" type="button" (click)="naviguer('matching')">
+                          Matching →
                         </button>
                       }
                       @if (don.statut === 'RESERVE') {
@@ -1593,7 +1593,7 @@
                     }
                     @if (["ADMIN","TRANSPORTEUR"].includes(utilisateur()?.role || "")) {
                       @for (statut of prochainStatutsDon(don); track statut) {
-                        <button class="button button--sm button--primary" type="button" (click)="changerStatutDonation(don, statut)">
+                        <button class="button button--xs button--status" type="button" (click)="changerStatutDonation(don, statut)">
                           → {{ libelleStatutDon(statut) }}
                         </button>
                       }
