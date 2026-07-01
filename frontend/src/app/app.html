@@ -294,6 +294,9 @@
         <span>
           <strong>{{ utilisateur()?.prenom }} {{ utilisateur()?.nom }}</strong>
           <small>{{ utilisateur()?.role }}</small>
+          @if (utilisateur()?.role === 'ONG' && utilisateur()?.categorieAssociation) {
+            <span class="sidebar-ong-cat">{{ emojiCategorieAssociation(utilisateur()?.categorieAssociation) }} {{ libelleCategorieAssociation(utilisateur()?.categorieAssociation) }}</span>
+          }
         </span>
       </div>
 
@@ -420,6 +423,14 @@
             <div>
               <span class="eyebrow">Session {{ utilisateur()?.role }}</span>
               <h2>Bonjour, {{ utilisateur()?.prenom }}.</h2>
+              @if (utilisateur()?.role === 'ONG' && utilisateur()?.categorieAssociation) {
+                <div class="hero-ong-cat">
+                  <span class="hero-ong-cat__badge">
+                    {{ emojiCategorieAssociation(utilisateur()?.categorieAssociation) }}
+                    {{ libelleCategorieAssociation(utilisateur()?.categorieAssociation) }}
+                  </span>
+                </div>
+              }
               <p>
                 Votre environnement est prêt. Utilisez la navigation pour
                 tester chaque étape autorisée du parcours.
