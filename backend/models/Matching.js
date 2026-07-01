@@ -12,9 +12,9 @@ const criteresSchema = new mongoose.Schema(
 
 const matchingSchema = new mongoose.Schema(
   {
-    offre: {
+    donation: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Annonce',
+      ref: 'Donation',
       required: true
     },
     demande: {
@@ -55,16 +55,7 @@ const matchingSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-matchingSchema.pre('validate', function validateDistinctAnnouncements() {
-  if (this.offre && this.demande && this.offre.equals(this.demande)) {
-    this.invalidate(
-      'demande',
-      'L’offre et la demande doivent être deux annonces différentes'
-    );
-  }
-});
-
-matchingSchema.index({ offre: 1, demande: 1 }, { unique: true });
+matchingSchema.index({ donation: 1, demande: 1 }, { unique: true });
 matchingSchema.index({ statut: 1, score: -1 });
 
 module.exports = mongoose.model('Matching', matchingSchema);

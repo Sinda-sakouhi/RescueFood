@@ -1,23 +1,373 @@
 const { calculerDistanceKm, estimerDureeMinutes } = require('./logistique');
 
+const OSRM_BASE_URL =
+  process.env.OSRM_BASE_URL || 'https://router.project-osrm.org';
+const OSRM_TIMEOUT_MS = Number(process.env.OSRM_TIMEOUT_MS || 4500);
+const OPEN_METEO_BASE_URL =
+  process.env.OPEN_METEO_BASE_URL || 'https://api.open-meteo.com';
+const OPEN_METEO_TIMEOUT_MS = Number(process.env.OPEN_METEO_TIMEOUT_MS || 3500);
+
+const COEFFICIENTS_DUREE_ML = Object.freeze({
+  intercept: 3,
+  dureeRoutiere: 1.08,
+  heurePointe: 0.18,
+  weekend: -0.08,
+  urgenceElevee: -0.05,
+  urgenceMoyenne: 0,
+  missionsActives: 0.09,
+  ponctualiteFaible: 0.22,
+  distanceLongue: 0.06,
+  congestionZone: 0.12,
+  pluie: 0.14,
+  ventFort: 0.08
+});
+
+const ZONES_TUNIS = Object.freeze([
+  {
+    nom: 'Centre-ville Tunis',
+    latitude: 36.8065,
+    longitude: 10.1815,
+    congestion: 0.85,
+    description: 'Hyper-centre, nombreuses intersections et stationnement difficile'
+  },
+  {
+    nom: 'Lac et Berges du Lac',
+    latitude: 36.839,
+    longitude: 10.244,
+    congestion: 0.65,
+    description: 'Zone de bureaux avec pics matin et soir'
+  },
+  {
+    nom: 'Ariana',
+    latitude: 36.8665,
+    longitude: 10.1647,
+    congestion: 0.7,
+    description: 'Flux domicile-travail vers Tunis'
+  },
+  {
+    nom: 'Ben Arous',
+    latitude: 36.7531,
+    longitude: 10.2189,
+    congestion: 0.58,
+    description: 'Zone mixte industrielle et résidentielle'
+  },
+  {
+    nom: 'La Marsa',
+    latitude: 36.8782,
+    longitude: 10.3247,
+    congestion: 0.55,
+    description: 'Trafic côtier et déplacements vers le Grand Tunis'
+  }
+]);
+
+/**
+ * Maintient une valeur dans un intervalle, généralement entre 0 et 1.
+ */
 function borner(valeur, minimum = 0, maximum = 1) {
   return Math.min(maximum, Math.max(minimum, valeur));
 }
 
+/**
+ * Arrondit les scores afin de produire des réponses API faciles à lire.
+ */
 function arrondir(valeur, decimales = 2) {
   const facteur = 10 ** decimales;
   return Math.round(valeur * facteur) / facteur;
 }
 
+/**
+ * Valide qu'un point possède des coordonnées GPS exploitables par OSRM.
+ */
+function pointValide(point) {
+  return (
+    point &&
+    Number.isFinite(point.latitude) &&
+    Number.isFinite(point.longitude) &&
+    point.latitude >= -90 &&
+    point.latitude <= 90 &&
+    point.longitude >= -180 &&
+    point.longitude <= 180
+  );
+}
+
+/**
+ * Convertit une position latitude/longitude au format OSRM longitude,latitude.
+ */
+function coordonneeOsrm(point) {
+  return `${point.longitude},${point.latitude}`;
+}
+
+/**
+ * Appelle OSRM avec un timeout court pour garder l'API utilisable en démo même
+ * si le service public de routing est lent ou indisponible.
+ */
+async function appelerOsrm(path, { fetchImpl = globalThis.fetch } = {}) {
+  if (!fetchImpl) {
+    throw new Error('Fetch indisponible pour appeler OSRM');
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OSRM_TIMEOUT_MS);
+
+  try {
+    const url = `${OSRM_BASE_URL.replace(/\/$/, '')}${path}`;
+    const response = await fetchImpl(url, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`OSRM a répondu ${response.status}`);
+    }
+
+    const body = await response.json();
+    if (body.code && body.code !== 'Ok') {
+      throw new Error(`OSRM code ${body.code}`);
+    }
+
+    return body;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Appelle Open-Meteo pour récupérer un contexte météo actuel sans clé API.
+ */
+async function appelerOpenMeteo(point, { fetchImpl = globalThis.fetch } = {}) {
+  if (!fetchImpl || !pointValide(point)) {
+    throw new Error('Coordonnees meteo invalides');
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OPEN_METEO_TIMEOUT_MS);
+
+  try {
+    const params = new URLSearchParams({
+      latitude: String(point.latitude),
+      longitude: String(point.longitude),
+      current: 'precipitation,rain,weather_code,wind_speed_10m',
+      timezone: 'Africa/Tunis'
+    });
+    const url = `${OPEN_METEO_BASE_URL.replace(
+      /\/$/,
+      ''
+    )}/v1/forecast?${params.toString()}`;
+    const response = await fetchImpl(url, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`Open-Meteo a repondu ${response.status}`);
+    }
+
+    return response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Demande à OSRM la route routière réelle dans un ordre déjà choisi.
+ */
+async function calculerRouteOsrm(points, options = {}) {
+  if (points.length < 2 || points.some((point) => !pointValide(point))) {
+    throw new Error('Points GPS insuffisants pour OSRM');
+  }
+
+  const coordonnees = points.map(coordonneeOsrm).join(';');
+  const body = await appelerOsrm(
+    `/route/v1/driving/${coordonnees}?overview=full&geometries=polyline`,
+    options
+  );
+  const route = body.routes?.[0];
+  if (!route) {
+    throw new Error('Aucune route OSRM trouvée');
+  }
+
+  return {
+    distanceKm: arrondir(route.distance / 1000, 1),
+    dureeMinutes: Math.max(1, Math.round(route.duration / 60)),
+    polyline: route.geometry || null
+  };
+}
+
+/**
+ * Utilise OSRM Trip pour optimiser l'ordre des points de collecte sur de vraies
+ * routes routières. Les livraisons restent ensuite attachées à leur collecte.
+ */
+async function optimiserOrdrePickupOsrm(
+  collectes,
+  positionInitiale,
+  options = {}
+) {
+  const pointsPickup = collectes.map(pointDepartCollecte);
+  if (
+    !pointValide(positionInitiale) ||
+    pointsPickup.some((point) => !pointValide(point))
+  ) {
+    throw new Error('Coordonnées insuffisantes pour optimiser avec OSRM');
+  }
+
+  if (collectes.length === 1) {
+    return collectes;
+  }
+
+  const coordonnees = [positionInitiale, ...pointsPickup]
+    .map(coordonneeOsrm)
+    .join(';');
+  const body = await appelerOsrm(
+    `/trip/v1/driving/${coordonnees}?source=first&destination=any&roundtrip=false&overview=false`,
+    options
+  );
+  const waypoints = body.waypoints || [];
+  const ordreParIndex = new Map(
+    waypoints.map(({ waypoint_index: waypointIndex }, inputIndex) => [
+      inputIndex,
+      waypointIndex
+    ])
+  );
+
+  return collectes
+    .map((collecte, index) => ({
+      collecte,
+      ordreOsrm: ordreParIndex.get(index + 1) ?? index + 1
+    }))
+    .sort((a, b) => a.ordreOsrm - b.ordreOsrm)
+    .map(({ collecte }) => collecte);
+}
+
+/**
+ * Calcule le nombre d'heures restantes avant une date cible.
+ */
 function heuresAvant(date, maintenant = new Date()) {
   if (!date) return 24;
   return (new Date(date) - maintenant) / 3600000;
 }
 
+/**
+ * Détermine si une date tombe dans les créneaux de pointe typiques du Grand
+ * Tunis. Ces règles servent d'approximation avant de disposer de données
+ * historiques fines par quartier.
+ */
+function analyserHeurePointeTunis(date) {
+  const heure = date.getHours();
+  const jour = date.getDay();
+  const vendredi = jour === 5;
+  const matin = heure >= 7 && heure <= 9;
+  const midiVendredi = vendredi && heure >= 11 && heure <= 14;
+  const soir = heure >= 16 && heure <= 19;
+
+  return {
+    heurePointe: matin || midiVendredi || soir,
+    type:
+      (matin && 'POINTE_MATIN') ||
+      (midiVendredi && 'VENDREDI_MIDI') ||
+      (soir && 'POINTE_SOIR') ||
+      'FLUIDE'
+  };
+}
+
+/**
+ * Associe un point GPS à la zone tunisienne de référence la plus proche.
+ */
+function trouverZoneTunisienne(point) {
+  if (!pointValide(point)) {
+    return {
+      nom: 'Zone inconnue',
+      distanceKm: null,
+      congestion: 0.5,
+      description: 'Coordonnees absentes'
+    };
+  }
+
+  return ZONES_TUNIS.map((zone) => ({
+    ...zone,
+    distanceKm: calculerDistanceKm(point, zone)
+  })).sort((a, b) => a.distanceKm - b.distanceKm)[0];
+}
+
+/**
+ * Transforme les données météo en pénalités simples et explicables.
+ */
+function analyserMeteo(openMeteoBody) {
+  const current = openMeteoBody?.current || {};
+  const precipitation = Number(current.precipitation || current.rain || 0);
+  const ventKmh = Number(current.wind_speed_10m || 0);
+  const weatherCode = Number(current.weather_code || 0);
+  const pluie = precipitation > 0.2 || [51, 53, 55, 61, 63, 65, 80, 81, 82].includes(weatherCode);
+  const ventFort = ventKmh >= 35;
+
+  return {
+    source: 'Open-Meteo',
+    precipitationMm: arrondir(precipitation, 1),
+    ventKmh: arrondir(ventKmh, 1),
+    weatherCode,
+    pluie,
+    ventFort,
+    penalite: arrondir((pluie ? 0.14 : 0) + (ventFort ? 0.08 : 0))
+  };
+}
+
+/**
+ * Construit le contexte tunisien utilisé par les prédictions ML : zone,
+ * congestion locale, heure de pointe et météo actuelle.
+ */
+async function construireContexteTunisien(
+  collecte,
+  { fetchImpl = globalThis.fetch, maintenant = new Date() } = {}
+) {
+  const depart = pointDepartCollecte(collecte);
+  const arrivee = collecte.localisationArrivee;
+  const dateCollecte = collecte.dateCollectePrevue
+    ? new Date(collecte.dateCollectePrevue)
+    : maintenant;
+  const zoneDepart = trouverZoneTunisienne(depart);
+  const zoneArrivee = trouverZoneTunisienne(arrivee);
+  const heurePointe = analyserHeurePointeTunis(dateCollecte);
+
+  let meteo = {
+    source: 'Fallback local',
+    precipitationMm: 0,
+    ventKmh: 0,
+    weatherCode: null,
+    pluie: false,
+    ventFort: false,
+    penalite: 0,
+    erreur: null
+  };
+  try {
+    meteo = analyserMeteo(await appelerOpenMeteo(depart, { fetchImpl }));
+  } catch (error) {
+    meteo.erreur = error.message;
+  }
+
+  return {
+    zoneDepart: {
+      nom: zoneDepart.nom,
+      distanceKm: zoneDepart.distanceKm,
+      congestion: zoneDepart.congestion,
+      description: zoneDepart.description
+    },
+    zoneArrivee: {
+      nom: zoneArrivee.nom,
+      distanceKm: zoneArrivee.distanceKm,
+      congestion: zoneArrivee.congestion,
+      description: zoneArrivee.description
+    },
+    heurePointe,
+    meteo,
+    penaliteContexte: arrondir(
+      (heurePointe.heurePointe ? 0.18 : 0) +
+        zoneDepart.congestion * COEFFICIENTS_DUREE_ML.congestionZone +
+        meteo.penalite
+    )
+  };
+}
+
+/**
+ * Convertit le niveau d'urgence métier en score numérique normalisé.
+ */
 function scoreUrgence(urgence) {
   return { ELEVEE: 1, MOYENNE: 0.65, FAIBLE: 0.35 }[urgence] || 0.5;
 }
 
+/**
+ * Donne davantage de poids aux missions dont l'échéance est proche.
+ */
 function scoreEcheance(date, maintenant) {
   const heures = heuresAvant(date, maintenant);
   if (heures <= 2) return 1;
@@ -27,6 +377,88 @@ function scoreEcheance(date, maintenant) {
   return 0.3;
 }
 
+/**
+ * Identifie le type alimentaire même lorsque la catégorie est peuplée par
+ * Mongoose ou seulement stockée comme référence.
+ */
+function typeProduitCollecte(collecte) {
+  const categorie = collecte.donation?.categorieDonation;
+  return categorie?.typeProduit || categorie?.type || null;
+}
+
+/**
+ * Calcule la priorité sanitaire d'une collecte. Cette priorité passe avant la
+ * distance quand une denrée est très périssable ou doit rester en chaîne du
+ * froid.
+ */
+function evaluerPrioriteAlimentaire(collecte, maintenant = new Date()) {
+  const donation = collecte.donation || {};
+  const typeProduit = typeProduitCollecte(collecte);
+  const temperature = donation.temperatureStockage;
+  const conditions = `${donation.conditionsStockage || ''} ${
+    donation.description || ''
+  }`.toLowerCase();
+  const baseParType = {
+    PRODUITS_LAITIERS: 1,
+    PLATS_PREPARES: 0.92,
+    FRUITS_LEGUMES: 0.68,
+    PAIN_VIENNOISERIE: 0.48,
+    BOISSONS: 0.3,
+    CONSERVES: 0.18,
+    AUTRE: 0.45
+  };
+  const base = baseParType[typeProduit] ?? 0.45;
+  const froid =
+    temperature !== null &&
+    temperature !== undefined &&
+    Number.isFinite(Number(temperature)) &&
+    Number(temperature) <= 8;
+  const froidStrict = froid && Number(temperature) <= 4;
+  const produitLaitier = typeProduit === 'PRODUITS_LAITIERS';
+  const chaineFroid =
+    froid ||
+    conditions.includes('froid') ||
+    conditions.includes('frigorifique') ||
+    conditions.includes('réfrig') ||
+    conditions.includes('refrig');
+  const dateLimite =
+    donation.dateLimiteCollecte ||
+    collecte.dateLivraisonPrevue ||
+    collecte.dateCollectePrevue;
+  const echeance = scoreEcheance(dateLimite, maintenant);
+  const urgence = scoreUrgence(donation.urgence || collecte.urgence);
+  const score = borner(
+    base * 0.45 +
+      echeance * 0.25 +
+      urgence * 0.15 +
+      (chaineFroid ? 0.1 : 0) +
+      (froidStrict ? 0.05 : 0) +
+      (produitLaitier ? 0.08 : 0)
+  );
+  const raisons = [
+    `type ${typeProduit || 'inconnu'}`,
+    `urgence ${donation.urgence || collecte.urgence || 'non renseignee'}`,
+    `echeance ${arrondir(echeance)}`
+  ];
+  if (chaineFroid) raisons.push('chaine du froid prioritaire');
+  if (froidStrict) raisons.push('temperature <= 4°C');
+  if (produitLaitier) raisons.push('produits laitiers tres perissables');
+
+  return {
+    score: arrondir(score),
+    pourcentage: Math.round(score * 100),
+    niveau: score >= 0.75 ? 'CRITIQUE' : score >= 0.55 ? 'ELEVEE' : 'NORMALE',
+    typeProduit,
+    chaineFroid,
+    temperatureStockage: temperature ?? null,
+    raisons
+  };
+}
+
+/**
+ * Détermine le prochain point utile d'une collecte. Une mission déjà en cours
+ * repart de sa position GPS actuelle plutôt que de son adresse initiale.
+ */
 function pointDepartCollecte(collecte) {
   if (
     ['EN_ROUTE', 'COLLECTEE'].includes(collecte.statut) &&
@@ -37,6 +469,10 @@ function pointDepartCollecte(collecte) {
   return collecte.localisationDepart;
 }
 
+/**
+ * Additionne les distances d'approche et de livraison d'une tournée dans
+ * l'ordre fourni.
+ */
 function distanceSequence(collectes, positionInitiale) {
   let position = positionInitiale;
   let total = 0;
@@ -53,6 +489,284 @@ function distanceSequence(collectes, positionInitiale) {
   return arrondir(total, 1);
 }
 
+/**
+ * Construit la succession réelle des arrêts : position actuelle, départ de la
+ * collecte, livraison ONG, puis collecte suivante.
+ */
+function construirePointsTournee(collectes, positionInitiale) {
+  const points = [];
+  if (pointValide(positionInitiale)) points.push(positionInitiale);
+
+  for (const collecte of collectes) {
+    const depart = pointDepartCollecte(collecte);
+    if (pointValide(depart)) points.push(depart);
+    if (pointValide(collecte.localisationArrivee)) {
+      points.push(collecte.localisationArrivee);
+    }
+  }
+
+  return points;
+}
+
+/**
+ * Choisit l'ordre des collectes en combinant priorité sanitaire, proximité et
+ * ordre routier OSRM. Le but est d'éviter qu'un trajet court mette en danger
+ * une denrée fragile.
+ */
+function optimiserOrdreSanitaire(
+  collectes,
+  positionInitiale,
+  { ordreOsrm = collectes, maintenant = new Date() } = {}
+) {
+  const ordreOsrmParId = new Map(
+    ordreOsrm.map((collecte, index) => [String(collecte._id), index])
+  );
+  const restantes = [...collectes];
+  const ordre = [];
+  let position = positionInitiale;
+
+  while (restantes.length) {
+    const candidates = restantes.map((collecte) => {
+      const prioriteAlimentaire = evaluerPrioriteAlimentaire(
+        collecte,
+        maintenant
+      );
+      const depart = pointDepartCollecte(collecte);
+      const distanceApprocheKm =
+        position && depart ? calculerDistanceKm(position, depart) : 0;
+      const proximite = borner(1 - distanceApprocheKm / 30);
+      const rangOsrm = ordreOsrmParId.get(String(collecte._id)) ?? 0;
+      const preferenceOsrm =
+        restantes.length <= 1 ? 1 : 1 - rangOsrm / Math.max(1, collectes.length - 1);
+      const score =
+        prioriteAlimentaire.score * 0.62 +
+        proximite * 0.23 +
+        preferenceOsrm * 0.15;
+
+      return {
+        collecte,
+        score,
+        prioriteAlimentaire,
+        distanceApprocheKm,
+        criteres: {
+          prioriteAlimentaire: prioriteAlimentaire.score,
+          proximite: arrondir(proximite),
+          preferenceOsrm: arrondir(preferenceOsrm)
+        }
+      };
+    });
+
+    candidates.sort((a, b) => {
+      const differenceSanitaire =
+        b.prioriteAlimentaire.score - a.prioriteAlimentaire.score;
+      if (Math.abs(differenceSanitaire) >= 0.02) {
+        return differenceSanitaire;
+      }
+      return b.score - a.score;
+    });
+    const meilleure = candidates[0];
+    ordre.push(meilleure);
+    restantes.splice(restantes.indexOf(meilleure.collecte), 1);
+    position =
+      meilleure.collecte.localisationArrivee ||
+      pointDepartCollecte(meilleure.collecte) ||
+      position;
+  }
+
+  return ordre;
+}
+
+/**
+ * Prépare les facteurs utilisés par le modèle prédictif de durée.
+ */
+function extraireCaracteristiquesDuree(
+  collecte,
+  {
+    dureeRoutiereMinutes,
+    distanceRouteKm = collecte.distanceKm || 0,
+    collectesActivesTransporteur = 0,
+    ponctualiteTransporteur = 0.8,
+    contexteTunisien = null,
+    maintenant = new Date()
+  } = {}
+) {
+  const dateCollecte = collecte.dateCollectePrevue
+    ? new Date(collecte.dateCollectePrevue)
+    : maintenant;
+  const heure = dateCollecte.getHours();
+  const jour = dateCollecte.getDay();
+  const urgence = collecte.donation?.urgence || collecte.urgence;
+
+  return {
+    dureeRoutiereMinutes,
+    distanceRouteKm,
+    heurePointe:
+      contexteTunisien?.heurePointe?.heurePointe ||
+      (heure >= 7 && heure <= 9) ||
+      (heure >= 16 && heure <= 19),
+    typeHeurePointe: contexteTunisien?.heurePointe?.type || null,
+    weekend: jour === 0 || jour === 6,
+    urgenceElevee: urgence === 'ELEVEE',
+    urgenceMoyenne: urgence === 'MOYENNE',
+    collectesActivesTransporteur,
+    ponctualiteTransporteur,
+    ponctualiteFaible: ponctualiteTransporteur < 0.8,
+    distanceLongue: distanceRouteKm > 10,
+    contexteTunisien,
+    congestionZone: contexteTunisien?.zoneDepart?.congestion || 0,
+    pluie: Boolean(contexteTunisien?.meteo?.pluie),
+    ventFort: Boolean(contexteTunisien?.meteo?.ventFort)
+  };
+}
+
+/**
+ * Modèle prédictif local de durée. Il joue le rôle d'une première régression
+ * entraînable : les coefficients peuvent être remplacés par un modèle appris
+ * sur l'historique tunisien lorsque le projet collecte assez de données.
+ */
+function predireDureeCollecteML(collecte, options = {}) {
+  const dureeRoutiereMinutes =
+    options.dureeRoutiereMinutes ||
+    collecte.dureeEstimeeMinutes ||
+    estimerDureeMinutes(collecte.distanceKm || 0);
+  const caracteristiques = extraireCaracteristiquesDuree(collecte, {
+    ...options,
+    dureeRoutiereMinutes
+  });
+
+  const multiplicateur =
+    1 +
+    (caracteristiques.heurePointe ? COEFFICIENTS_DUREE_ML.heurePointe : 0) +
+    (caracteristiques.weekend ? COEFFICIENTS_DUREE_ML.weekend : 0) +
+    (caracteristiques.urgenceElevee
+      ? COEFFICIENTS_DUREE_ML.urgenceElevee
+      : 0) +
+    (caracteristiques.urgenceMoyenne
+      ? COEFFICIENTS_DUREE_ML.urgenceMoyenne
+      : 0) +
+    Math.min(
+      0.35,
+      caracteristiques.collectesActivesTransporteur *
+        COEFFICIENTS_DUREE_ML.missionsActives
+    ) +
+    (caracteristiques.ponctualiteFaible
+      ? COEFFICIENTS_DUREE_ML.ponctualiteFaible
+      : 0) +
+    (caracteristiques.distanceLongue ? COEFFICIENTS_DUREE_ML.distanceLongue : 0);
+    const contexteSupplementaire =
+      caracteristiques.congestionZone * COEFFICIENTS_DUREE_ML.congestionZone +
+      (caracteristiques.pluie ? COEFFICIENTS_DUREE_ML.pluie : 0) +
+      (caracteristiques.ventFort ? COEFFICIENTS_DUREE_ML.ventFort : 0);
+
+  const dureePrediteMinutes = Math.max(
+    5,
+    Math.round(
+      COEFFICIENTS_DUREE_ML.intercept +
+        dureeRoutiereMinutes *
+          COEFFICIENTS_DUREE_ML.dureeRoutiere *
+          (multiplicateur + contexteSupplementaire)
+    )
+  );
+
+  return {
+    modele: 'Regression lineaire locale v1',
+    donneesEntrainement:
+      'Coefficients initialises pour demo, remplacables par historique tunisien',
+    dureePrediteMinutes,
+    dureeRoutiereMinutes: Math.round(dureeRoutiereMinutes),
+    ecartMinutes: dureePrediteMinutes - Math.round(dureeRoutiereMinutes),
+    caracteristiques: {
+      heurePointe: caracteristiques.heurePointe,
+      typeHeurePointe: caracteristiques.typeHeurePointe,
+      weekend: caracteristiques.weekend,
+      urgenceElevee: caracteristiques.urgenceElevee,
+      collectesActivesTransporteur:
+        caracteristiques.collectesActivesTransporteur,
+      ponctualiteTransporteur: arrondir(
+        caracteristiques.ponctualiteTransporteur
+      ),
+      distanceRouteKm: arrondir(caracteristiques.distanceRouteKm, 1),
+      zoneDepart: caracteristiques.contexteTunisien?.zoneDepart?.nom || null,
+      congestionZone: arrondir(caracteristiques.congestionZone),
+      pluie: caracteristiques.pluie,
+      ventFort: caracteristiques.ventFort,
+      meteoSource: caracteristiques.contexteTunisien?.meteo?.source || null
+    }
+  };
+}
+
+/**
+ * Convertit une durée prédite en risque métier de retard avec niveau et raisons.
+ */
+function predireRetardML(collecte, options = {}) {
+  const prediction = predireDureeCollecteML(collecte, options);
+  const maintenant = options.maintenant || new Date();
+  const livraisonPrevue = collecte.dateLivraisonPrevue
+    ? new Date(collecte.dateLivraisonPrevue)
+    : null;
+  const margeMinutes = livraisonPrevue
+    ? Math.round((livraisonPrevue - maintenant) / 60000) -
+      prediction.dureePrediteMinutes
+    : null;
+
+  let risque = 0.2;
+  const raisons = [];
+  if (!collecte.transporteur || collecte.statut === 'A_ASSIGNER') {
+    risque += 0.25;
+    raisons.push('Transporteur non assigne');
+  }
+  if (margeMinutes !== null) {
+    if (margeMinutes < 0) {
+      risque += Math.min(0.45, 0.25 + Math.abs(margeMinutes) / 180);
+      raisons.push('Duree ML predite apres l echeance');
+    } else if (margeMinutes < 30) {
+      risque += 0.18;
+      raisons.push('Marge inferieure a 30 minutes');
+    }
+  }
+  if (prediction.caracteristiques.heurePointe) {
+    risque += 0.12;
+    raisons.push('Collecte prevue en heure de pointe');
+  }
+  if (prediction.caracteristiques.pluie) {
+    risque += 0.1;
+    raisons.push('Meteo pluvieuse detectee');
+  }
+  if (prediction.caracteristiques.congestionZone >= 0.7) {
+    risque += 0.08;
+    raisons.push('Zone de depart a congestion elevee');
+  }
+  if (prediction.caracteristiques.collectesActivesTransporteur > 1) {
+    risque += 0.1;
+    raisons.push('Transporteur deja charge');
+  }
+  if (prediction.caracteristiques.ponctualiteTransporteur < 0.8) {
+    risque += 0.12;
+    raisons.push('Ponctualite historique faible');
+  }
+
+  risque = borner(risque);
+  const niveau =
+    risque >= 0.7 ? 'CRITIQUE' : risque >= 0.4 ? 'ATTENTION' : 'FAIBLE';
+
+  return {
+    modele: prediction.modele,
+    score: arrondir(risque),
+    pourcentage: Math.round(risque * 100),
+    niveau,
+    margeMinutes,
+    dureePrediteMinutes: prediction.dureePrediteMinutes,
+    raisons: raisons.length ? raisons : ['Aucun facteur ML de retard important'],
+    prediction
+  };
+}
+
+/**
+ * Construit une tournée par choix glouton : à chaque étape, la prochaine
+ * collecte est celle qui maximise proximité, urgence et échéance.
+ *
+ * @returns {object} Ordre proposé, distances avant/après et durée estimée.
+ */
 function optimiserOrdreCollectes(
   collectes,
   positionInitiale,
@@ -114,6 +828,140 @@ function optimiserOrdreCollectes(
   };
 }
 
+/**
+ * Optimise une tournée avec de vraies distances routières OSRM et enrichit le
+ * résultat par une prédiction ML de durée/retard. En cas d'échec OSRM, le
+ * fallback garde l'ancienne optimisation locale.
+ */
+async function optimiserItineraireRoutierML(
+  collectes,
+  positionInitiale,
+  {
+    fetchImpl = globalThis.fetch,
+    statistiquesParCollecte = new Map(),
+    maintenant = new Date()
+  } = {}
+) {
+  try {
+    const ordreOsrm = await optimiserOrdrePickupOsrm(
+      collectes,
+      positionInitiale,
+      { fetchImpl }
+    );
+    const ordreSanitaire = optimiserOrdreSanitaire(collectes, positionInitiale, {
+      ordreOsrm,
+      maintenant
+    });
+    const ordreCollectes = ordreSanitaire.map(({ collecte }) => collecte);
+    const pointsOptimises = construirePointsTournee(
+      ordreCollectes,
+      positionInitiale
+    );
+    const pointsInitiaux = construirePointsTournee(
+      [...collectes].sort(
+        (a, b) =>
+          new Date(a.dateCollectePrevue) - new Date(b.dateCollectePrevue)
+      ),
+      positionInitiale
+    );
+    const [routeOptimisee, routeInitiale] = await Promise.all([
+      calculerRouteOsrm(pointsOptimises, { fetchImpl }),
+      calculerRouteOsrm(pointsInitiaux, { fetchImpl })
+    ]);
+    const dureeParCollecte = Math.max(
+      1,
+      Math.round(routeOptimisee.dureeMinutes / ordreCollectes.length)
+    );
+
+    return {
+      sourceRouting: 'OSRM',
+      methode: 'OSRM Trip + modele ML de duree',
+      distanceInitialeKm: routeInitiale.distanceKm,
+      distanceOptimiseeKm: routeOptimisee.distanceKm,
+      gainDistanceKm: arrondir(
+        Math.max(0, routeInitiale.distanceKm - routeOptimisee.distanceKm),
+        1
+      ),
+      dureeRouteMinutes: routeOptimisee.dureeMinutes,
+      polyline: routeOptimisee.polyline,
+      ordreOptimise: ordreSanitaire.map((item, index) => {
+        const { collecte, prioriteAlimentaire, criteres } = item;
+        const stats = statistiquesParCollecte.get(String(collecte._id)) || {};
+        const prediction = predireDureeCollecteML(collecte, {
+          ...stats,
+          dureeRoutiereMinutes: dureeParCollecte,
+          distanceRouteKm: routeOptimisee.distanceKm / ordreCollectes.length,
+          contexteTunisien: stats.contexteTunisien,
+          maintenant
+        });
+
+        return {
+          ordre: index + 1,
+          collecte,
+          prioriteAlimentaire,
+          criteresOptimisation: criteres,
+          dureePrediteMinutes: prediction.dureePrediteMinutes,
+          prediction
+        };
+      })
+    };
+  } catch (error) {
+    const ordreSanitaire = optimiserOrdreSanitaire(collectes, positionInitiale, {
+      maintenant
+    });
+    const collectesOrdonnees = ordreSanitaire.map(({ collecte }) => collecte);
+    const distanceInitialeKm = distanceSequence(
+      [...collectes].sort(
+        (a, b) =>
+          new Date(a.dateCollectePrevue) - new Date(b.dateCollectePrevue)
+      ),
+      positionInitiale
+    );
+    const distanceOptimiseeKm = distanceSequence(
+      collectesOrdonnees,
+      positionInitiale
+    );
+    return {
+      sourceRouting: 'FALLBACK_LOCAL',
+      methode: 'Fallback local avec priorite alimentaire',
+      raisonFallback: error.message,
+      distanceInitialeKm,
+      distanceOptimiseeKm,
+      gainDistanceKm: arrondir(
+        Math.max(0, distanceInitialeKm - distanceOptimiseeKm),
+        1
+      ),
+      dureeRouteMinutes: estimerDureeMinutes(distanceOptimiseeKm),
+      polyline: null,
+      ordreOptimise: ordreSanitaire.map((item, index) => {
+        const { collecte, prioriteAlimentaire, criteres } = item;
+        const stats = statistiquesParCollecte.get(String(collecte._id)) || {};
+        const prediction = predireDureeCollecteML(collecte, {
+          ...stats,
+          dureeRoutiereMinutes: estimerDureeMinutes(distanceOptimiseeKm),
+          contexteTunisien: stats.contexteTunisien,
+          maintenant
+        });
+
+        return {
+          ordre: index + 1,
+          collecte,
+          prioriteAlimentaire,
+          criteresOptimisation: criteres,
+          dureePrediteMinutes: prediction.dureePrediteMinutes,
+          prediction
+        };
+      })
+    };
+  }
+}
+
+/**
+ * Produit un risque de retard explicable en cumulant les facteurs métier :
+ * assignation, échéances, ponctualité, charge active et fraîcheur du GPS.
+ *
+ * @returns {object} Score, pourcentage, niveau, marge et raisons détaillées.
+ */
 function evaluerRisqueRetard(
   collecte,
   {
@@ -200,6 +1048,12 @@ function evaluerRisqueRetard(
   };
 }
 
+/**
+ * Évalue l'adéquation d'un transporteur à une collecte avec quatre critères :
+ * proximité, disponibilité, ponctualité et expérience.
+ *
+ * @returns {object} Score global et détail de chaque critère.
+ */
 function scorerTransporteur(
   transporteur,
   collecte,
@@ -246,7 +1100,12 @@ function scorerTransporteur(
 }
 
 module.exports = {
+  construireContexteTunisien,
+  evaluerPrioriteAlimentaire,
   optimiserOrdreCollectes,
+  optimiserItineraireRoutierML,
   evaluerRisqueRetard,
+  predireDureeCollecteML,
+  predireRetardML,
   scorerTransporteur
 };

@@ -7,11 +7,17 @@ const {
   estimerDureeMinutes
 } = require('../utils/logistique');
 const {
+  construireContexteTunisien,
+  evaluerPrioriteAlimentaire,
   optimiserOrdreCollectes,
+  optimiserItineraireRoutierML,
   evaluerRisqueRetard,
+  predireDureeCollecteML,
+  predireRetardML,
   scorerTransporteur
 } = require('../utils/logistiqueIA');
 
+// Vérifie que le backend bloque les raccourcis incohérents dans le workflow.
 test('le workflow autorise uniquement les transitions attendues', () => {
   assert.equal(peutTransitionner('PLANIFIEE', 'EN_ROUTE'), true);
   assert.equal(peutTransitionner('PLANIFIEE', 'LIVREE'), false);
@@ -19,6 +25,7 @@ test('le workflow autorise uniquement les transitions attendues', () => {
   assert.deepEqual(prochainsStatuts('COLLECTEE'), ['LIVREE', 'ANNULEE']);
 });
 
+// Contrôle le calcul géographique sur deux coordonnées connues à Tunis.
 test('la distance logistique est calculée en kilomètres', () => {
   const distance = calculerDistanceKm(
     { latitude: 36.7982, longitude: 10.1706 },
@@ -30,6 +37,7 @@ test('la distance logistique est calculée en kilomètres', () => {
   assert.ok(estimerDureeMinutes(distance) >= 10);
 });
 
+// Vérifie que le score de tournée place une mission proche et urgente en tête.
 test('l’optimisation privilégie une collecte proche et urgente', () => {
   const maintenant = new Date('2026-06-13T10:00:00.000Z');
   const resultat = optimiserOrdreCollectes(
@@ -64,6 +72,7 @@ test('l’optimisation privilégie une collecte proche et urgente', () => {
   assert.ok(resultat.distanceOptimiseeKm > 0);
 });
 
+// Reproduit une mission dépassée et chargée pour valider le niveau CRITIQUE.
 test('le risque de retard devient critique pour une collecte dépassée', () => {
   const analyse = evaluerRisqueRetard(
     {
@@ -85,6 +94,7 @@ test('le risque de retard devient critique pour une collecte dépassée', () => 
   assert.ok(analyse.raisons.includes('Heure de collecte prévue dépassée'));
 });
 
+// Compare deux profils afin de valider l'ordre du classement des transporteurs.
 test('la recommandation favorise proximité et disponibilité', () => {
   const collecte = {
     localisationDepart: { latitude: 36.8, longitude: 10.17 }
@@ -102,4 +112,235 @@ test('la recommandation favorise proximité et disponibilité', () => {
 
   assert.ok(proche.score > eloigne.score);
   assert.ok(proche.pourcentage >= 80);
+});
+
+// Vérifie que le modèle ML tient compte du contexte et pas seulement de la distance.
+test('le modèle ML augmente la durée prévue en heure de pointe', () => {
+  const collecte = {
+    statut: 'PLANIFIEE',
+    donation: { urgence: 'MOYENNE' },
+    distanceKm: 8,
+    dureeEstimeeMinutes: 20,
+    dateCollectePrevue: '2026-06-15T08:00:00.000Z'
+  };
+  const fluide = predireDureeCollecteML(
+    {
+      ...collecte,
+      dateCollectePrevue: '2026-06-15T11:00:00.000Z'
+    },
+    {
+      collectesActivesTransporteur: 0,
+      ponctualiteTransporteur: 0.95
+    }
+  );
+  const charge = predireDureeCollecteML(collecte, {
+    collectesActivesTransporteur: 3,
+    ponctualiteTransporteur: 0.65
+  });
+
+  assert.ok(charge.dureePrediteMinutes > fluide.dureePrediteMinutes);
+  assert.equal(charge.caracteristiques.heurePointe, true);
+});
+
+// Vérifie que le contexte tunisien enrichit la prédiction avec zone et météo.
+test('le contexte tunisien ajoute zone, météo et pénalité locale', async () => {
+  const fetchImpl = async () => ({
+    ok: true,
+    json: async () => ({
+      current: {
+        precipitation: 1.2,
+        rain: 1.2,
+        weather_code: 61,
+        wind_speed_10m: 38
+      }
+    })
+  });
+  const collecte = {
+    statut: 'PLANIFIEE',
+    localisationDepart: { latitude: 36.8065, longitude: 10.1815 },
+    localisationArrivee: { latitude: 36.839, longitude: 10.244 },
+    dateCollectePrevue: '2026-06-19T12:00:00.000Z',
+    donation: { urgence: 'ELEVEE' },
+    dureeEstimeeMinutes: 20
+  };
+
+  const contexte = await construireContexteTunisien(collecte, {
+    fetchImpl,
+    maintenant: new Date('2026-06-19T10:00:00.000Z')
+  });
+  const prediction = predireDureeCollecteML(collecte, {
+    contexteTunisien: contexte,
+    collectesActivesTransporteur: 1,
+    ponctualiteTransporteur: 0.9
+  });
+
+  assert.equal(contexte.zoneDepart.nom, 'Centre-ville Tunis');
+  assert.equal(contexte.heurePointe.type, 'VENDREDI_MIDI');
+  assert.equal(contexte.meteo.pluie, true);
+  assert.equal(contexte.meteo.ventFort, true);
+  assert.ok(prediction.dureePrediteMinutes > collecte.dureeEstimeeMinutes);
+  assert.equal(prediction.caracteristiques.zoneDepart, 'Centre-ville Tunis');
+});
+
+// Reproduit une livraison impossible dans les temps avec le modèle ML.
+test('le retard ML devient critique quand la durée prédite dépasse l’échéance', () => {
+  const prediction = predireRetardML(
+    {
+      statut: 'PLANIFIEE',
+      transporteur: 'transporteur',
+      donation: { urgence: 'ELEVEE' },
+      distanceKm: 15,
+      dureeEstimeeMinutes: 45,
+      dateCollectePrevue: '2026-06-15T08:00:00.000Z',
+      dateLivraisonPrevue: '2026-06-15T08:20:00.000Z'
+    },
+    {
+      collectesActivesTransporteur: 4,
+      ponctualiteTransporteur: 0.6,
+      maintenant: new Date('2026-06-15T08:00:00.000Z')
+    }
+  );
+
+  assert.equal(prediction.niveau, 'CRITIQUE');
+  assert.ok(prediction.dureePrediteMinutes > 20);
+});
+
+// Mocke OSRM pour vérifier que la nouvelle optimisation utilise un ordre routier.
+test('l’optimisation ML utilise l’ordre renvoyé par OSRM', async () => {
+  const collectes = [
+    {
+      _id: 'collecte-1',
+      reference: 'COL-1',
+      statut: 'PLANIFIEE',
+      donation: { urgence: 'FAIBLE', titre: 'Mission 1' },
+      localisationDepart: { latitude: 36.82, longitude: 10.19 },
+      localisationArrivee: { latitude: 36.83, longitude: 10.2 },
+      dateCollectePrevue: '2026-06-15T10:00:00.000Z'
+    },
+    {
+      _id: 'collecte-2',
+      reference: 'COL-2',
+      statut: 'PLANIFIEE',
+      donation: { urgence: 'ELEVEE', titre: 'Mission 2' },
+      localisationDepart: { latitude: 36.8, longitude: 10.17 },
+      localisationArrivee: { latitude: 36.81, longitude: 10.18 },
+      dateCollectePrevue: '2026-06-15T09:00:00.000Z'
+    }
+  ];
+  const fetchImpl = async (url) => ({
+    ok: true,
+    json: async () =>
+      url.includes('/trip/')
+        ? {
+            code: 'Ok',
+            waypoints: [
+              { waypoint_index: 0 },
+              { waypoint_index: 2 },
+              { waypoint_index: 1 }
+            ]
+          }
+        : {
+            code: 'Ok',
+            routes: [
+              {
+                distance: 12300,
+                duration: 1800,
+                geometry: 'polyline-demo'
+              }
+            ]
+          }
+  });
+
+  const resultat = await optimiserItineraireRoutierML(
+    collectes,
+    { latitude: 36.8065, longitude: 10.1815 },
+    { fetchImpl }
+  );
+
+  assert.equal(resultat.sourceRouting, 'OSRM');
+  assert.equal(resultat.ordreOptimise[0].collecte._id, 'collecte-2');
+  assert.equal(resultat.polyline, 'polyline-demo');
+  assert.ok(resultat.ordreOptimise[0].dureePrediteMinutes > 0);
+});
+
+// Vérifie que la sécurité alimentaire peut passer devant l'ordre routier brut.
+test('l’optimisation ML priorise les produits laitiers fragiles avant un plat préparé', async () => {
+  const collectes = [
+    {
+      _id: 'couscous',
+      reference: 'COL-COUSCOUS',
+      statut: 'PLANIFIEE',
+      donation: {
+        urgence: 'ELEVEE',
+        titre: '45 portions de couscous',
+        temperatureStockage: 4,
+        conditionsStockage: 'Transport frigorifique obligatoire',
+        dateLimiteCollecte: '2026-06-15T12:00:00.000Z',
+        categorieDonation: { typeProduit: 'PLATS_PREPARES' }
+      },
+      localisationDepart: { latitude: 36.82, longitude: 10.19 },
+      localisationArrivee: { latitude: 36.83, longitude: 10.2 },
+      dateCollectePrevue: '2026-06-15T08:00:00.000Z'
+    },
+    {
+      _id: 'laitiers',
+      reference: 'COL-LAIT',
+      statut: 'PLANIFIEE',
+      donation: {
+        urgence: 'MOYENNE',
+        titre: 'Produits laitiers du buffet',
+        temperatureStockage: 4,
+        conditionsStockage: 'Chaîne du froid obligatoire',
+        dateLimiteCollecte: '2026-06-15T12:00:00.000Z',
+        categorieDonation: { typeProduit: 'PRODUITS_LAITIERS' }
+      },
+      localisationDepart: { latitude: 36.8, longitude: 10.17 },
+      localisationArrivee: { latitude: 36.81, longitude: 10.18 },
+      dateCollectePrevue: '2026-06-15T08:00:00.000Z'
+    }
+  ];
+  const fetchImpl = async (url) => ({
+    ok: true,
+    json: async () =>
+      url.includes('/trip/')
+        ? {
+            code: 'Ok',
+            waypoints: [
+              { waypoint_index: 0 },
+              { waypoint_index: 1 },
+              { waypoint_index: 2 }
+            ]
+          }
+        : {
+            code: 'Ok',
+            routes: [
+              {
+                distance: 12000,
+                duration: 1800,
+                geometry: 'polyline-demo'
+              }
+            ]
+          }
+  });
+
+  const prioriteLaitiers = evaluerPrioriteAlimentaire(
+    collectes[1],
+    new Date('2026-06-15T08:00:00.000Z')
+  );
+  const prioriteCouscous = evaluerPrioriteAlimentaire(
+    collectes[0],
+    new Date('2026-06-15T08:00:00.000Z')
+  );
+  const resultat = await optimiserItineraireRoutierML(
+    collectes,
+    { latitude: 36.8065, longitude: 10.1815 },
+    { fetchImpl, maintenant: new Date('2026-06-15T08:00:00.000Z') }
+  );
+
+  assert.ok(prioriteLaitiers.score > prioriteCouscous.score);
+  assert.equal(resultat.ordreOptimise[0].collecte._id, 'laitiers');
+  assert.equal(
+    resultat.ordreOptimise[0].prioriteAlimentaire.typeProduit,
+    'PRODUITS_LAITIERS'
+  );
 });

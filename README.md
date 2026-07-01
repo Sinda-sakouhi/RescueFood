@@ -84,6 +84,10 @@ PORT=3000
 MONGODB_URI=mongodb://127.0.0.1:27017/RescueFood
 JWT_SECRET=remplacer-par-un-secret-long-et-aleatoire
 JWT_EXPIRES_IN=1h
+OSRM_BASE_URL=https://router.project-osrm.org
+OSRM_TIMEOUT_MS=4500
+OPEN_METEO_BASE_URL=https://api.open-meteo.com
+OPEN_METEO_TIMEOUT_MS=3500
 ```
 
 Le fichier `.env` est privé et ne doit jamais être ajouté à Git.
@@ -203,6 +207,16 @@ Les routes protégées nécessitent cet en-tête :
 Authorization: Bearer VOTRE_JWT
 ```
 
+Toutes les requêtes `POST`, `PUT` ou `PATCH` qui possèdent un corps JSON
+doivent également envoyer :
+
+```text
+Content-Type: application/json
+```
+
+Dans Postman, sélectionner **Body > raw > JSON** et non **Text**. Un corps
+envoyé dans un autre format retourne `415`. Un JSON mal formé retourne `400`.
+
 ### APIs communes et administration
 
 Ces routes transversales ne sont rattachées à aucune branche métier.
@@ -230,6 +244,10 @@ Branche responsable : `feature/logistique-dashboard`.
 | `GET` | `/api/logistique/rapport.pdf` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Télécharger le rapport PDF |
 | `GET` | `/api/logistique/transporteurs` | `ADMIN` | Lister les transporteurs et leur charge |
 | `POST` | `/api/logistique/ia/itineraire/optimiser` | `ADMIN`, `TRANSPORTEUR` | Optimiser l'ordre des collectes |
+| `POST` | `/api/logistique/ml/itineraire/optimiser` | `ADMIN`, `TRANSPORTEUR` | Optimiser avec OSRM et prédire les durées |
+| `GET` | `/api/logistique/ml/collectes/:id/contexte-tunisien` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Analyser zone, heure de pointe et météo |
+| `GET` | `/api/logistique/ml/collectes/:id/duree-predite` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Prédire la durée réelle d'une collecte |
+| `GET` | `/api/logistique/ml/collectes/:id/retard-predit` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Prédire le risque de retard avec le modèle ML |
 | `GET` | `/api/logistique/ia/collectes/:id/risque-retard` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Prédire le risque de retard |
 | `GET` | `/api/logistique/ia/collectes/:id/transporteurs-recommandes` | `ADMIN` | Classer les transporteurs |
 | `GET` | `/api/logistique/collectes` | `ADMIN`, `TRANSPORTEUR`, `FOURNISSEUR`, `ONG` | Lister les collectes accessibles |
@@ -831,6 +849,42 @@ Ces fonctionnalités utilisent des scores multicritères déterministes. Elles n
 prétendent pas être un modèle entraîné sur un grand historique : chaque score
 est explicable, testable et pourra ensuite être remplacé par un modèle ML.
 
+La version ML ajoute une deuxième couche dans `backend/utils/logistiqueIA.js` :
+
+- OSRM calcule des distances et durées routières réelles quand Internet est
+  disponible ;
+- Open-Meteo ajoute un contexte météo réel sans clé API ;
+- une approximation locale associe les coordonnées à une zone du Grand Tunis
+  et applique des créneaux de pointe typiques : matin, soir et vendredi midi ;
+- un modèle de régression locale prédit la durée réelle selon la durée routière,
+  l'heure de collecte, le jour, l'urgence, la charge du transporteur, sa
+  ponctualité, la zone et la météo ;
+- l'ordre final est multi-objectif : la sécurité alimentaire passe avant la
+  distance quand une denrée est plus fragile, par exemple produits laitiers,
+  chaîne du froid ou échéance très proche ;
+- si OSRM ne répond pas, l'API revient automatiquement à l'optimisation locale
+  pour que la démonstration reste utilisable.
+
+Variables optionnelles :
+
+```env
+OSRM_BASE_URL=https://router.project-osrm.org
+OSRM_TIMEOUT_MS=4500
+OPEN_METEO_BASE_URL=https://api.open-meteo.com
+OPEN_METEO_TIMEOUT_MS=3500
+```
+
+Pour une précision réelle en production, le modèle doit être réentraîné avec
+des historiques locaux : collectes tunisiennes, heures de pointe tunisiennes,
+durées réelles, retards, quartiers, météo ou jours spéciaux. Pour une première
+démonstration, il peut fonctionner avec des coefficients de départ et les
+routes OpenStreetMap d'OSRM, mais ses prédictions seront moins précises qu'un
+modèle entraîné sur Tunis.
+
+Les zones tunisiennes intégrées sont une approximation de démonstration :
+Centre-ville Tunis, Lac et Berges du Lac, Ariana, Ben Arous et La Marsa. Elles
+servent à expliquer le modèle, pas à remplacer une vraie base de trafic.
+
 #### `POST /api/logistique/ia/itineraire/optimiser`
 
 L'administrateur fournit un transporteur. Le transporteur connecté utilise
@@ -938,6 +992,173 @@ Cette route administrateur classe les transporteurs validés pour une collecte
 }
 ```
 
+#### `POST /api/logistique/ml/itineraire/optimiser`
+
+Cette route utilise OSRM pour obtenir de vraies distances routières. Elle
+combine ensuite l'ordre routier avec une priorité sanitaire afin d'éviter qu'un
+trajet court mette en danger une denrée fragile. Les produits laitiers, plats
+préparés, températures froides et échéances proches peuvent donc passer avant
+un arrêt plus proche.
+
+```json
+{
+  "transporteurId": "OBJECT_ID",
+  "collecteIds": ["OBJECT_ID_OPTIONNEL"],
+  "positionDepart": {
+    "latitude": 36.8065,
+    "longitude": 10.1815
+  }
+}
+```
+
+Exemple de réponse :
+
+```json
+{
+  "methode": "OSRM Trip + modele ML de duree",
+  "sourceRouting": "OSRM",
+  "modele": "Regression lineaire locale v1",
+  "distanceInitialeKm": 18.4,
+  "distanceOptimiseeKm": 12.7,
+  "gainDistanceKm": 5.7,
+  "dureeRouteMinutes": 31,
+  "polyline": "encoded_polyline",
+  "ordreOptimise": [
+    {
+      "ordre": 1,
+      "collecteId": "OBJECT_ID",
+      "reference": "COL-DEMO-001",
+      "titre": "Cagettes de tomates",
+      "prioriteAlimentaire": {
+        "score": 0.88,
+        "pourcentage": 88,
+        "niveau": "CRITIQUE",
+        "typeProduit": "PRODUITS_LAITIERS",
+        "chaineFroid": true,
+        "temperatureStockage": 4,
+        "raisons": [
+          "type PRODUITS_LAITIERS",
+          "chaine du froid prioritaire",
+          "produits laitiers tres perissables"
+        ]
+      },
+      "criteresOptimisation": {
+        "prioriteAlimentaire": 0.88,
+        "proximite": 0.73,
+        "preferenceOsrm": 0.5
+      },
+      "dureePrediteMinutes": 36,
+      "prediction": {
+        "modele": "Regression lineaire locale v1",
+        "donneesEntrainement": "Coefficients initialises pour demo, remplacables par historique tunisien",
+        "dureeRoutiereMinutes": 31,
+        "ecartMinutes": 5
+      }
+    }
+  ]
+}
+```
+
+Si OSRM est indisponible, `sourceRouting` vaut `FALLBACK_LOCAL` et la réponse
+contient `raisonFallback`.
+
+#### `GET /api/logistique/ml/collectes/:id/contexte-tunisien`
+
+Retourne les facteurs locaux utilisés par le modèle ML : zone de départ,
+zone d'arrivée, heure de pointe tunisienne, météo Open-Meteo et pénalité de
+contexte.
+
+```json
+{
+  "collecte": {
+    "id": "OBJECT_ID",
+    "reference": "COL-DEMO-001",
+    "titre": "Cagettes de tomates"
+  },
+  "contexte": {
+    "zoneDepart": {
+      "nom": "Centre-ville Tunis",
+      "congestion": 0.85,
+      "description": "Hyper-centre, nombreuses intersections et stationnement difficile"
+    },
+    "zoneArrivee": {
+      "nom": "Lac et Berges du Lac",
+      "congestion": 0.65
+    },
+    "heurePointe": {
+      "heurePointe": true,
+      "type": "POINTE_MATIN"
+    },
+    "meteo": {
+      "source": "Open-Meteo",
+      "precipitationMm": 0.4,
+      "ventKmh": 22,
+      "pluie": true,
+      "ventFort": false,
+      "penalite": 0.14
+    },
+    "penaliteContexte": 0.42
+  }
+}
+```
+
+Si Open-Meteo est indisponible, `meteo.source` vaut `Fallback local` et la
+prédiction continue sans bloquer la démonstration.
+
+#### `GET /api/logistique/ml/collectes/:id/duree-predite`
+
+Prédit la durée réelle d'une collecte à partir du modèle local.
+
+```json
+{
+  "collecte": {
+    "id": "OBJECT_ID",
+    "reference": "COL-DEMO-001",
+    "titre": "Cagettes de tomates"
+  },
+  "prediction": {
+    "modele": "Regression lineaire locale v1",
+    "dureePrediteMinutes": 38,
+    "dureeRoutiereMinutes": 31,
+    "ecartMinutes": 7,
+    "caracteristiques": {
+      "heurePointe": true,
+      "weekend": false,
+      "urgenceElevee": true,
+      "collectesActivesTransporteur": 2,
+      "ponctualiteTransporteur": 0.8,
+      "distanceRouteKm": 8.4,
+      "zoneDepart": "Centre-ville Tunis",
+      "congestionZone": 0.85,
+      "pluie": true,
+      "ventFort": false,
+      "meteoSource": "Open-Meteo"
+    }
+  }
+}
+```
+
+#### `GET /api/logistique/ml/collectes/:id/retard-predit`
+
+Convertit la durée prédite en risque de retard.
+
+```json
+{
+  "prediction": {
+    "modele": "Regression lineaire locale v1",
+    "score": 0.72,
+    "pourcentage": 72,
+    "niveau": "CRITIQUE",
+    "margeMinutes": -12,
+    "dureePrediteMinutes": 38,
+    "raisons": [
+      "Duree ML predite apres l echeance",
+      "Transporteur deja charge"
+    ]
+  }
+}
+```
+
 ### Modèle `Collecte`
 
 Le modèle contient notamment : `reference`, `donation`, `transporteur`,
@@ -945,6 +1166,26 @@ Le modèle contient notamment : `reference`, `donation`, `transporteur`,
 coordonnées, la distance, la durée estimée, les dates prévues et réelles,
 `vehicule`, `positionActuelle`, `historiquePositions`, `historiqueStatuts` et
 `itineraireOptimise`.
+
+### Fichiers backend de la partie d'Aziz
+
+Le code logistique contient des commentaires explicatifs avant les fonctions
+principales afin de faciliter sa lecture et sa présentation :
+
+| Fichier | Responsabilité |
+|---|---|
+| `backend/routes/logistiqueRoutes.js` | Routes HTTP et permissions par rôle |
+| `backend/controllers/logistiqueController.js` | Contrôleurs des APIs logistiques, dashboard, carte et PDF |
+| `backend/models/Collecte.js` | Schéma MongoDB d'une mission de collecte |
+| `backend/utils/logistique.js` | Workflow, distance GPS et estimation de durée |
+| `backend/utils/logistiqueIA.js` | Optimisation, risque de retard et recommandation |
+| `backend/test/logistique.test.js` | Tests unitaires de la logique métier et IA |
+
+Ordre conseillé pour présenter le code :
+
+```text
+routes -> contrôleur -> modèle -> utilitaires métier -> IA -> tests
+```
 
 ### Comptes de démonstration
 

@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 
+// Structure réutilisable pour valider toutes les coordonnées GPS du module.
 const localisationSchema = new mongoose.Schema(
   {
     latitude: {
@@ -18,6 +19,7 @@ const localisationSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Résultat optionnel d'une optimisation d'itinéraire persistée en base.
 const itineraireSchema = new mongoose.Schema(
   {
     polyline: {
@@ -35,6 +37,7 @@ const itineraireSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Point GPS horodaté utilisé dans l'historique de suivi d'une mission.
 const positionSchema = new mongoose.Schema(
   {
     latitude: { type: Number, required: true, min: -90, max: 90 },
@@ -44,6 +47,7 @@ const positionSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Trace chaque changement de statut, son auteur et une éventuelle justification.
 const historiqueStatutSchema = new mongoose.Schema(
   {
     statut: { type: String, required: true },
@@ -58,6 +62,8 @@ const historiqueStatutSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// Document central du module : une collecte relie une donation, son fournisseur,
+// son ONG bénéficiaire, un transporteur et toutes les données du trajet.
 const collecteSchema = new mongoose.Schema(
   {
     reference: {
@@ -181,6 +187,7 @@ const collecteSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Ces index accélèrent les vues transporteur, les dashboards et les tris par date.
 collecteSchema.index({ transporteur: 1, statut: 1 });
 collecteSchema.index({ dateCollectePrevue: 1 });
 collecteSchema.index({ statut: 1, dateCollectePrevue: 1 });

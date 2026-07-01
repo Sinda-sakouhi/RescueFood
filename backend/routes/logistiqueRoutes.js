@@ -8,7 +8,11 @@ const {
   updateStatut,
   updatePosition,
   optimiserItineraire,
+  optimiserItineraireML,
   risqueRetard,
+  contexteTunisienML,
+  dureePrediteML,
+  retardPreditML,
   recommanderTransporteurs,
   dashboard,
   carte,
@@ -18,7 +22,10 @@ const { authenticate, authorizeRoles } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Toutes les routes logistiques exigent d'abord un JWT valide.
 router.use(authenticate);
+
+// Vues de supervision accessibles aux acteurs impliqués dans une collecte.
 router.get(
   '/dashboard',
   authorizeRoles('ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'),
@@ -34,11 +41,33 @@ router.get(
   authorizeRoles('ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'),
   rapportPdf
 );
+
+// Gestion et aide à la décision réservées totalement ou partiellement à l'admin.
 router.get('/transporteurs', authorizeRoles('ADMIN'), listTransporteurs);
 router.post(
   '/ia/itineraire/optimiser',
   authorizeRoles('ADMIN', 'TRANSPORTEUR'),
   optimiserItineraire
+);
+router.post(
+  '/ml/itineraire/optimiser',
+  authorizeRoles('ADMIN', 'TRANSPORTEUR'),
+  optimiserItineraireML
+);
+router.get(
+  '/ml/collectes/:id/contexte-tunisien',
+  authorizeRoles('ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'),
+  contexteTunisienML
+);
+router.get(
+  '/ml/collectes/:id/duree-predite',
+  authorizeRoles('ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'),
+  dureePrediteML
+);
+router.get(
+  '/ml/collectes/:id/retard-predit',
+  authorizeRoles('ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'),
+  retardPreditML
 );
 router.get(
   '/ia/collectes/:id/risque-retard',
@@ -50,6 +79,8 @@ router.get(
   authorizeRoles('ADMIN'),
   recommanderTransporteurs
 );
+
+// CRUD opérationnel des collectes avec visibilité filtrée selon le rôle.
 router.get(
   '/collectes',
   authorizeRoles('ADMIN', 'TRANSPORTEUR', 'FOURNISSEUR', 'ONG'),

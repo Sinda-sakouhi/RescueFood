@@ -1,9 +1,9 @@
 const mongoose = require('mongoose');
+const Donation = require('../models/Donation');
 const Annonce = require('../models/Annonce');
 const Matching = require('../models/Matching');
 const Conversation = require('../models/Conversation');
 
-// Calcule la distance en km entre deux points GPS (formule Haversine)
 function calculerDistance(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -17,36 +17,26 @@ function calculerDistance(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// Calcule le score de matching entre une offre et une demande
-function calculerScore(offre, demande) {
-  // Score catégorie (1 si même catégorie, 0 sinon)
-  const scoreCategorie = offre.categorieDonation.equals(
-    demande.categorieDonation
-  )
-    ? 1
-    : 0;
+function calculerScore(donation, demande) {
+  const scoreCategorie = donation.categorieDonation.equals(demande.categorieDonation) ? 1 : 0;
 
-  // Score distance (1 si < 2km, dégressif jusqu'à 0 à 50km)
+  const locDon = donation.localisationCollecte;
+  const locDem = demande.localisation;
   const distance = calculerDistance(
-    offre.localisation.latitude,
-    offre.localisation.longitude,
-    demande.localisation.latitude,
-    demande.localisation.longitude
+    locDon.latitude, locDon.longitude,
+    locDem.latitude, locDem.longitude
   );
   const scoreDistance = Math.max(0, 1 - distance / 50);
 
-  // Score quantité (ratio entre min et max des deux quantités)
   const scoreQuantite =
-    Math.min(offre.quantiteEstimee, demande.quantiteEstimee) /
-    Math.max(offre.quantiteEstimee, demande.quantiteEstimee);
+    Math.min(donation.quantiteEstimee, demande.quantiteEstimee) /
+    Math.max(donation.quantiteEstimee, demande.quantiteEstimee);
 
-  // Score urgence
   const niveaux = { FAIBLE: 1, MOYENNE: 2, ELEVEE: 3 };
-  const urgenceOffre = niveaux[offre.urgence] || 2;
-  const urgenceDemande = niveaux[demande.urgence] || 2;
-  const scoreUrgence = 1 - Math.abs(urgenceOffre - urgenceDemande) / 2;
+  const urgenceDon = niveaux[donation.urgence] || 2;
+  const urgenceDem = niveaux[demande.urgence] || 2;
+  const scoreUrgence = 1 - Math.abs(urgenceDon - urgenceDem) / 2;
 
-  // Score global pondéré
   const scoreGlobal =
     scoreCategorie * 0.4 +
     scoreDistance * 0.3 +
@@ -66,9 +56,11 @@ function calculerScore(offre, demande) {
 }
 
 // GET /api/matchings/suggestions
+// FOURNISSEUR voit ses donations matchées avec les DEMANDE actives
+// ONG voit ses DEMANDE matchées avec les donations disponibles
 async function getSuggestions(request, response, next) {
   try {
-    const role = request.user.role;
+    const { role, _id: userId } = request.user;
 
     if (role !== 'FOURNISSEUR' && role !== 'ONG') {
       return response.status(403).json({
@@ -76,49 +68,69 @@ async function getSuggestions(request, response, next) {
       });
     }
 
-    const typeRecherche = role === 'FOURNISSEUR' ? 'OFFRE' : 'DEMANDE';
-    const typeCompatible = role === 'FOURNISSEUR' ? 'DEMANDE' : 'OFFRE';
+    let donations, demandes;
 
-    const mesAnnonces = await Annonce.find({
-      auteur: request.user._id,
-      type: typeRecherche,
-      statut: 'ACTIVE'
-    });
+    if (role === 'FOURNISSEUR') {
+      donations = await Donation.find({
+        fournisseur: userId,
+        statut: { $in: ['CREE', 'VALIDE'] }
+      }).populate('categorieDonation', 'nom');
 
-    if (mesAnnonces.length === 0) {
-      return response.json({
-        message: 'Aucune annonce active trouvée',
-        suggestions: []
-      });
+      demandes = await Annonce.find({
+        type: 'DEMANDE',
+        statut: 'ACTIVE'
+      })
+        .populate('auteur', 'nom prenom role')
+        .populate('categorieDonation', 'nom');
+    } else {
+      demandes = await Annonce.find({
+        auteur: userId,
+        type: 'DEMANDE',
+        statut: 'ACTIVE'
+      }).populate('categorieDonation', 'nom');
+
+      donations = await Donation.find({
+        statut: { $in: ['CREE', 'VALIDE'] },
+        fournisseur: { $ne: userId }
+      })
+        .populate('fournisseur', 'nom prenom role')
+        .populate('categorieDonation', 'nom');
     }
 
-    const annoncesCompatibles = await Annonce.find({
-      type: typeCompatible,
-      statut: 'ACTIVE',
-      auteur: { $ne: request.user._id }
-    }).populate('auteur', 'nom prenom role adresse');
+    if (!donations.length || !demandes.length) {
+      return response.json({ suggestions: [] });
+    }
 
     const suggestions = [];
 
-    for (const monAnnonce of mesAnnonces) {
-      for (const annonce of annoncesCompatibles) {
-        const { score, criteres, distanceKm } = calculerScore(
-          typeRecherche === 'OFFRE' ? monAnnonce : annonce,
-          typeRecherche === 'OFFRE' ? annonce : monAnnonce
-        );
+    for (const donation of donations) {
+      for (const demande of demandes) {
+        if (!donation.localisationCollecte || !demande.localisation) continue;
+
+        const { score, criteres, distanceKm } = calculerScore(donation, demande);
 
         if (score > 0.3) {
           suggestions.push({
-            monAnnonce: {
-              id: monAnnonce._id,
-              titre: monAnnonce.titre,
-              type: monAnnonce.type
+            donation: {
+              _id: donation._id,
+              titre: donation.titre,
+              fournisseur: donation.fournisseur,
+              categorieDonation: donation.categorieDonation,
+              quantiteEstimee: donation.quantiteEstimee,
+              unite: donation.unite,
+              urgence: donation.urgence,
+              poidsTotalKg: donation.poidsTotalKg,
+              adresseCollecte: donation.adresseCollecte
             },
-            annonceCompatible: {
-              id: annonce._id,
-              titre: annonce.titre,
-              type: annonce.type,
-              auteur: annonce.auteur
+            demande: {
+              _id: demande._id,
+              titre: demande.titre,
+              auteur: demande.auteur,
+              categorieDonation: demande.categorieDonation,
+              quantiteEstimee: demande.quantiteEstimee,
+              unite: demande.unite,
+              urgence: demande.urgence,
+              adresse: demande.adresse
             },
             score,
             criteres,
@@ -136,71 +148,58 @@ async function getSuggestions(request, response, next) {
   }
 }
 
-// POST /api/matchings — accepter un matching
-// → crée le matching ET la conversation automatiquement
+// POST /api/matchings — accepter un matching donation ↔ demande
 async function accepterMatching(request, response, next) {
   try {
-    const { offreId, demandeId } = request.body;
+    const { donationId, demandeId } = request.body;
 
     if (
-      !mongoose.isValidObjectId(offreId) ||
+      !mongoose.isValidObjectId(donationId) ||
       !mongoose.isValidObjectId(demandeId)
     ) {
       return response.status(400).json({ message: 'Identifiant invalide' });
     }
 
-    const [offre, demande] = await Promise.all([
-      Annonce.findById(offreId),
+    const [donation, demande] = await Promise.all([
+      Donation.findById(donationId),
       Annonce.findById(demandeId)
     ]);
 
-    if (!offre || !demande) {
-      return response.status(404).json({ message: 'Annonce introuvable' });
+    if (!donation) return response.status(404).json({ message: 'Donation introuvable' });
+    if (!demande) return response.status(404).json({ message: 'Annonce introuvable' });
+
+    if (demande.type !== 'DEMANDE') {
+      return response.status(400).json({ message: "L'annonce doit être de type DEMANDE" });
     }
 
-    if (offre.type !== 'OFFRE' || demande.type !== 'DEMANDE') {
-      return response.status(400).json({
-        message: 'Le premier identifiant doit être une offre et le second une demande'
-      });
+    if (demande.statut !== 'ACTIVE') {
+      return response.status(400).json({ message: "L'annonce DEMANDE doit être active" });
     }
 
-    if (offre.statut !== 'ACTIVE' || demande.statut !== 'ACTIVE') {
-      return response.status(400).json({
-        message: 'Les deux annonces doivent être actives'
-      });
+    if (!['CREE', 'VALIDE'].includes(donation.statut)) {
+      return response.status(400).json({ message: 'La donation doit être disponible (CREE ou VALIDE)' });
     }
 
-    // Vérifier que l'utilisateur est l'auteur de l'une des deux annonces
-    const estAuteur =
-      offre.auteur.equals(request.user._id) ||
-      demande.auteur.equals(request.user._id);
+    const estFournisseur = donation.fournisseur.equals(request.user._id);
+    const estONG = demande.auteur.equals(request.user._id);
 
-    if (!estAuteur) {
+    if (!estFournisseur && !estONG) {
       return response.status(403).json({
-        message: 'Vous devez être l\'auteur d\'une des deux annonces'
+        message: "Vous devez être l'auteur de la donation ou de la demande"
       });
     }
 
-    // Vérifier si un matching existe déjà
-    const matchingExistant = await Matching.findOne({
-      offre: offreId,
-      demande: demandeId
-    });
-
+    const matchingExistant = await Matching.findOne({ donation: donationId, demande: demandeId });
     if (matchingExistant && matchingExistant.statut === 'ACCEPTE') {
-      return response.status(409).json({
-        message: 'Un matching actif existe déjà entre ces deux annonces'
-      });
+      return response.status(409).json({ message: 'Un matching actif existe déjà' });
     }
 
-    // Calculer le score
-    const { score, criteres, distanceKm } = calculerScore(offre, demande);
+    const { score, criteres, distanceKm } = calculerScore(donation, demande);
 
-    // 1. Créer ou mettre à jour le matching
     const matching = await Matching.findOneAndUpdate(
-      { offre: offreId, demande: demandeId },
+      { donation: donationId, demande: demandeId },
       {
-        offre: offreId,
+        donation: donationId,
         demande: demandeId,
         score,
         criteres,
@@ -208,39 +207,26 @@ async function accepterMatching(request, response, next) {
         statut: 'ACCEPTE',
         expireLe: new Date(Date.now() + 24 * 60 * 60 * 1000)
       },
-      {
-        upsert: true,
-        returnDocument: 'after',
-        runValidators: true
-      }
+      { upsert: true, returnDocument: 'after', runValidators: true }
     );
 
-    // 2. Mettre à jour le statut des deux annonces → MATCHEE
-    await Annonce.updateMany(
-      { _id: { $in: [offreId, demandeId] } },
-      {
+    // Donation → RESERVE, Annonce DEMANDE → MATCHEE
+    await Promise.all([
+      Donation.findByIdAndUpdate(donationId, { statut: 'RESERVE' }),
+      Annonce.findByIdAndUpdate(demandeId, {
         $set: { statut: 'MATCHEE' },
-        $push: {
-          historiqueStatuts: {
-            statut: 'MATCHEE',
-            date: new Date()
-          }
-        }
-      }
-    );
+        $push: { historiqueStatuts: { statut: 'MATCHEE', date: new Date() } }
+      })
+    ]);
 
-    // 3. Créer la conversation automatiquement
-    // Vérifier si une conversation existe déjà pour ce matching
-    const convExistante = await Conversation.findOne({
-      matching: matching._id
-    });
-
+    // Créer la conversation entre fournisseur et ONG
+    const convExistante = await Conversation.findOne({ matching: matching._id });
     let conversation = convExistante;
 
     if (!convExistante) {
       conversation = await Conversation.create({
-        participants: [offre.auteur, demande.auteur],
-        annonce: offre._id,
+        participants: [donation.fournisseur, demande.auteur],
+        annonce: demande._id,
         matching: matching._id,
         statut: 'ACTIVE',
         dernierMessageAt: new Date()
@@ -262,24 +248,33 @@ async function accepterMatching(request, response, next) {
   }
 }
 
-// GET /api/matchings — liste des matchings de l'utilisateur
+// GET /api/matchings
 async function listMatchings(request, response, next) {
   try {
-    const mesAnnonces = await Annonce.find({
-      auteur: request.user._id
-    }).select('_id');
+    const { role, _id: userId } = request.user;
 
-    const ids = mesAnnonces.map((a) => a._id);
+    let matchings;
 
-    const matchings = await Matching.find({
-      $or: [
-        { offre: { $in: ids } },
-        { demande: { $in: ids } }
-      ]
-    })
-      .populate('offre', 'titre type auteur quantiteEstimee unite')
-      .populate('demande', 'titre type auteur quantiteEstimee unite')
-      .sort({ score: -1 });
+    if (role === 'FOURNISSEUR') {
+      const mesDonations = await Donation.find({ fournisseur: userId }).select('_id');
+      const ids = mesDonations.map((d) => d._id);
+      matchings = await Matching.find({ donation: { $in: ids } })
+        .populate('donation', 'titre fournisseur quantiteEstimee unite urgence')
+        .populate('demande', 'titre auteur quantiteEstimee unite urgence')
+        .sort({ score: -1 });
+    } else if (role === 'ONG') {
+      const mesDemandes = await Annonce.find({ auteur: userId, type: 'DEMANDE' }).select('_id');
+      const ids = mesDemandes.map((a) => a._id);
+      matchings = await Matching.find({ demande: { $in: ids } })
+        .populate('donation', 'titre fournisseur quantiteEstimee unite urgence')
+        .populate('demande', 'titre auteur quantiteEstimee unite urgence')
+        .sort({ score: -1 });
+    } else {
+      matchings = await Matching.find()
+        .populate('donation', 'titre fournisseur quantiteEstimee unite urgence')
+        .populate('demande', 'titre auteur quantiteEstimee unite urgence')
+        .sort({ score: -1 });
+    }
 
     return response.json({ matchings });
   } catch (error) {
@@ -287,7 +282,7 @@ async function listMatchings(request, response, next) {
   }
 }
 
-// PATCH /api/matchings/:id/refuser — refuser un matching
+// PATCH /api/matchings/:id/refuser
 async function refuserMatching(request, response, next) {
   try {
     if (!mongoose.isValidObjectId(request.params.id)) {
@@ -295,42 +290,30 @@ async function refuserMatching(request, response, next) {
     }
 
     const matching = await Matching.findById(request.params.id)
-      .populate('offre')
+      .populate('donation')
       .populate('demande');
 
-    if (!matching) {
-      return response.status(404).json({ message: 'Matching introuvable' });
-    }
+    if (!matching) return response.status(404).json({ message: 'Matching introuvable' });
 
-    // Vérifier que l'utilisateur est auteur d'une des annonces
-    const estAuteur =
-      matching.offre.auteur.equals(request.user._id) ||
-      matching.demande.auteur.equals(request.user._id);
+    const estFournisseur = matching.donation.fournisseur.equals(request.user._id);
+    const estONG = matching.demande.auteur.equals(request.user._id);
 
-    if (!estAuteur) {
-      return response.status(403).json({
-        message: 'Vous ne pouvez pas refuser ce matching'
-      });
+    if (!estFournisseur && !estONG) {
+      return response.status(403).json({ message: 'Vous ne pouvez pas refuser ce matching' });
     }
 
     matching.statut = 'REFUSE';
     await matching.save();
 
-    // Remettre les annonces en ACTIVE
-    await Annonce.updateMany(
-      { _id: { $in: [matching.offre._id, matching.demande._id] } },
-      {
+    await Promise.all([
+      Donation.findByIdAndUpdate(matching.donation._id, { statut: 'VALIDE' }),
+      Annonce.findByIdAndUpdate(matching.demande._id, {
         $set: { statut: 'ACTIVE' },
-        $push: {
-          historiqueStatuts: {
-            statut: 'ACTIVE',
-            date: new Date()
-          }
-        }
-      }
-    );
+        $push: { historiqueStatuts: { statut: 'ACTIVE', date: new Date() } }
+      })
+    ]);
 
-    return response.json({ message: 'Matching refusé — annonces remises en actif' });
+    return response.json({ message: 'Matching refusé — donation et demande remises en disponible' });
   } catch (error) {
     return next(error);
   }
